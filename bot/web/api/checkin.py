@@ -5,9 +5,8 @@ checkin.py - 签到验证API路由
 """
 import random
 import aiohttp
-import json
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Request, HTTPException, Depends, Header
+from fastapi import APIRouter, Request, HTTPException, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -36,8 +35,7 @@ class CheckinVerifyRequest(BaseModel):
 
 @route.get("/web", response_class=HTMLResponse)
 async def checkin_page(request: Request):
-    """签到页面 - 直接返回HTML，在前端通过Telegram WebApp API获取用户ID"""
-    # 直接返回签到页面，不进行预先检查，由前端JS处理验证
+    """签到页面"""
     return templates.TemplateResponse(
         "checkin.html", 
         {"request": request, "site_key": TURNSTILE_SITE_KEY}
@@ -46,7 +44,7 @@ async def checkin_page(request: Request):
 @route.post("/verify")
 async def verify_checkin(request: CheckinVerifyRequest, user_agent: str = Header(None)):
     """验证签到"""
-    LOGGER.info(f"Checkin request from user_id: {request.user_id} with User-Agent: {user_agent}")
+    LOGGER.info(f"请求来自用户: {request.user_id} UA: {user_agent}")
     
     if not _open.checkin:
         raise HTTPException(status_code=403, detail="签到功能未开启")
@@ -54,7 +52,7 @@ async def verify_checkin(request: CheckinVerifyRequest, user_agent: str = Header
     # 检查用户是否存在
     e = sql_get_emby(request.user_id)
     if not e:
-        raise HTTPException(status_code=404, detail="未查询到用户数据，请先注册账号")
+        raise HTTPException(status_code=404, detail="未查询到用户数据")
     
     # 验证 Cloudflare Turnstile
     async with aiohttp.ClientSession() as session:
@@ -63,7 +61,7 @@ async def verify_checkin(request: CheckinVerifyRequest, user_agent: str = Header
             data={
                 "secret": TURNSTILE_SECRET_KEY,
                 "response": request.token,
-                "remoteip": "0.0.0.0"  # 可选，可以从请求中获取
+                "remoteip": "0.0.0.0"
             }
         ) as response:
             result = await response.json()
@@ -77,14 +75,11 @@ async def verify_checkin(request: CheckinVerifyRequest, user_agent: str = Header
     
     # 检查今天是否已经签到
     if e.ch and e.ch.strftime("%Y-%m-%d") >= today:
-        raise HTTPException(status_code=409, detail="您今天已经签到过了，再签到剁掉你的小鸡鸡🐤。")
+        raise HTTPException(status_code=409, detail="您今天已经签到过了，再签到剁掉你的小鸡鸡🐤")
     
     # 处理签到奖励
     reward = random.randint(_open.checkin_reward[0], _open.checkin_reward[1])
     new_balance = e.iv + reward
-    
-    # 保存上次签到时间，用于计算连续签到天数
-    last_checkin_time = e.ch
     
     # 更新emby表
     sql_update_emby(Emby.tg == request.user_id, iv=new_balance, ch=now)
@@ -123,4 +118,4 @@ async def verify_checkin(request: CheckinVerifyRequest, user_agent: str = Header
         "message": "签到成功",
         "reward": f"获得 {reward} {sakura_b}，当前持有 {new_balance} {sakura_b}",
         "should_close": True
-    }) 
+    })

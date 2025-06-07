@@ -49,6 +49,10 @@
       --warning-border: #f59e0b;
     }
 
+    * {
+      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.2s ease;
+    }
+
     html, body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       background-color: var(--bg-primary);
@@ -59,7 +63,6 @@
       overflow: hidden;
       position: fixed;
       width: 100%;
-      transition: background-color 0.3s ease, color 0.3s ease;
     }
 
     body {
@@ -78,23 +81,13 @@
       box-shadow: 0 10px 20px var(--shadow);
       max-width: 500px;
       width: 100%;
-      transition: background-color 0.3s ease, box-shadow 0.3s ease;
     }
 
-    .title {
+    .title, h1 {
       color: var(--accent-color);
       font-size: 2.4em;
       margin-bottom: 20px;
       font-weight: 700;
-      transition: color 0.3s ease;
-    }
-
-    h1 {
-      color: var(--accent-color);
-      font-size: 2.4em;
-      margin-bottom: 20px;
-      font-weight: 700;
-      transition: color 0.3s ease;
     }
 
     p {
@@ -102,7 +95,6 @@
       line-height: 1.6;
       margin-bottom: 30px;
       color: var(--text-secondary);
-      transition: color 0.3s ease;
     }
 
     input[type="text"] {
@@ -115,7 +107,6 @@
       box-sizing: border-box;
       background-color: var(--bg-secondary);
       color: var(--text-primary);
-      transition: border-color 0.3s ease, background-color 0.3s ease, color 0.3s ease;
     }
 
     input[type="text"]:focus {
@@ -131,18 +122,19 @@
       border: none;
       border-radius: 12px;
       cursor: pointer;
-      transition: background-color 0.3s, transform 0.3s ease, box-shadow 0.2s ease;
       width: 100%;
       font-weight: 600;
     }
 
-    .check-in-btn:hover, button:hover {
+    .check-in-btn:hover:not(:disabled), 
+    button:hover:not(:disabled) {
       background-color: var(--button-hover);
       transform: translateY(-3px);
       box-shadow: 0 8px 15px var(--shadow);
     }
 
-    .check-in-btn:active, button:active {
+    .check-in-btn:active:not(:disabled), 
+    button:active:not(:disabled) {
       transform: translateY(2px);
       box-shadow: 0 2px 4px var(--shadow);
     }
@@ -160,22 +152,17 @@
       justify-content: center;
     }
 
-    .loading {
-      display: none;
-      margin-top: 20px;
-      font-size: 1em;
-      color: var(--button-bg);
-      transition: color 0.3s ease;
-    }
-
-    .result {
+    .loading, .result {
       display: none;
       margin-top: 20px;
       font-size: 1em;
       padding: 15px;
       border-radius: 10px;
       word-break: break-all;
-      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+    }
+
+    .loading {
+      color: var(--button-bg);
     }
 
     .result.success {
@@ -196,14 +183,6 @@
       border: 1px solid var(--warning-border);
     }
 
-    #result {
-      margin-top: 20px;
-      font-size: 1em;
-      color: var(--text-primary);
-      word-break: break-all;
-      transition: color 0.3s ease;
-    }
-
     .network-tip {
       margin-top: 15px;
       font-size: 0.9em;
@@ -212,7 +191,6 @@
       background-color: var(--warning-bg);
       color: var(--warning-text);
       border: 1px solid var(--warning-border);
-      transition: all 0.3s ease;
     }
 
     @media (max-width: 600px) {
@@ -242,7 +220,7 @@
         
         <div class="turnstile-container" id="turnstile-container"></div>
         
-        <button id="checkinBtn" class="check-in-btn" disabled>验证中...</button>
+        <button id="checkinBtn" class="check-in-btn" disabled>请先完成人机验证</button>
         
         <div class="network-tip">
             💡 无法签到？请检查网络或尝试更换代理重新打开页面
@@ -257,10 +235,6 @@
         let userId = null;
         let turnstileWidgetId = null;
         let lastClickTime = 0;
-        let mouseMovements = [];
-        let clicks = [];
-        let scrolls = [];
-        let operationTime = Date.now();
         
         tg.expand();
         
@@ -396,11 +370,7 @@
             try {
                 const requestData = {
                     user_id: userInfo.user_id,
-                    token: token,
-                    mouseMovements: mouseMovements,
-                    clicks: clicks,
-                    scrolls: scrolls,
-                    operationTime: operationTime
+                    token: token
                 };
                 
                 if (userInfo.chat_id && userInfo.message_id) {
