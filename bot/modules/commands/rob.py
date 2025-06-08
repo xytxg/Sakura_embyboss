@@ -9,7 +9,6 @@ from bot import bot, prefixes, game, sakura_b
 from bot.func_helper.msg_utils import deleteMessage, editMessage
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
-
 # 游戏平衡配置（基于每个用户约10个币的设定）
 COMMISSION_FEE = max(1, game.magnification)                    # 抢劫佣金：1币
 MAX_COMMISSION_FEE = max(3, game.magnification * 3)      # 最大抢劫钱：3币
@@ -29,22 +28,18 @@ LUCKY_AMOUNT = max(4, game.magnification * 4)                  # 幸运大奖：
 rob_games = {}
 rob_locks = {}
 
-
 def get_lock(key):
     if key not in rob_locks:
         rob_locks[key] = Lock()
     return rob_locks[key]
-
 
 async def delete_msg_with_error(message, error_text):
     error_message = await bot.send_message(message.chat.id, error_text, reply_to_message_id=message.id)
     asyncio.create_task(deleteMessage(error_message, 180))
     asyncio.create_task(deleteMessage(message, 180))
 
-
 def change_emby_amount(user_id, amount):
     sql_update_emby(Emby.tg == user_id, iv=amount)
-
 
 async def countdown(call, rob_message):
     while True:
@@ -53,7 +48,6 @@ async def countdown(call, rob_message):
             game = rob_games[rob_message.id]
             game['remaining_time'] -= 1
             await update_edit_message(call, game)
-
 
 async def start_rob(message, user, target_user):
     narrative_msg = await bot.send_message(
@@ -128,7 +122,6 @@ async def start_rob(message, user, target_user):
 
     asyncio.create_task(countdown(message, rob_message))
 
-
 async def show_onlooker_message(call, game):
     onlookers_messages = ["· 📺 围观群众"]
     if game['kanxi_list']:
@@ -137,7 +130,15 @@ async def show_onlooker_message(call, game):
             possible_messages = [
                 f"· {name} 纷纷说道：这都啥……",
                 f"· {name} 纷纷说道：板凳都搬来了……",
-                f"· {name} 纷纷说道：就给我看这些……"
+                f"· {name} 纷纷说道：就给我看这些……",
+                f"· {name} 默默举起了瓜子袋：继续继续～",
+                f"· {name} 低声嘀咕：快点打，我快下班了……",
+                f"· {name} 兴奋喊道：谁输谁请客啊！",
+                f"· {name} 忍不住笑出声：这操作我能笑一天",
+                f"· {name} 悄悄录了个屏：以后留着当表情包",
+                f"· {name} 满脸问号：我是不是进错群了？",
+                f"· {name} 边看边说：我押十块，赌翻车！",
+                f"· {name} 大喊：导演再来一条，这条不够劲！",
             ]
             # 随机选择一条消息
             selected_message = random.choice(possible_messages)
@@ -149,7 +150,6 @@ async def show_onlooker_message(call, game):
     reward_msg = await bot.send_message(game['chat_id'], reward_message, reply_to_message_id=game['rob_msg_id'])
 
     asyncio.create_task(deleteMessage(reward_msg, 180))
-
 
 async def update_edit_message(call, game, status=None):
     user_with_link = await get_fullname_with_link(game['user_id'])
@@ -186,11 +186,11 @@ async def update_edit_message(call, game, status=None):
         change_emby_amount(game['user_id'], user.iv + actual_rob_gold)
 
         await editMessage(game['original_message'], update_text)
-        answer = f"🎉 对方投降了\n\n获得：{actual_rob_gold} {sakura_b}\n余额：{user.iv + actual_rob_gold} {sakura_b}"
+        answer = f"🎉 对方投降了\n\n对方选择投降，乱世盗贼不战而胜\n获得：{actual_rob_gold} {sakura_b}\n余额：{user.iv + actual_rob_gold} {sakura_b}"
 
         await bot.send_message(user.tg, answer, reply_to_message_id=call.message.id)
 
-        target_answer = f"😌 你投降了\n\n割地赔款：{actual_rob_gold} {sakura_b}\n余额： {target_user.iv - actual_rob_gold} {sakura_b}️"
+        target_answer = f"😌 你投降了\n\n您向 {user_with_link} 的乱世盗贼投降\n割地赔款：{actual_rob_gold} {sakura_b}\n余额： {target_user.iv - actual_rob_gold} {sakura_b}️"
         await bot.send_message(target_user.tg, target_answer, reply_to_message_id=call.message.id)
 
         del rob_games[game['rob_msg_id']]
@@ -313,13 +313,13 @@ async def update_edit_message(call, game, status=None):
             
             # 参与了战斗的情况下，给围观群众发放奖励
             asyncio.create_task(handle_kanxi_rewards(game))
-            asyncio.create_task(deleteMessage(call.message, 180))
+            asyncio.create_task(deleteMessage(call, 180))
         
         del rob_games[game['rob_msg_id']]
     else:
         if game['round_time'] < 3:
             buttons = get_buttons(game)
-            update_text += f"· 📺 围观群众:\n {game['kanxi_name']}"
+            update_text += f"· 📺 围观群众:\n{game['kanxi_name']}"
             await editMessage(game['original_message'], update_text, buttons)
         else:
             await editMessage(game['original_message'], update_text)
@@ -337,7 +337,6 @@ def get_buttons(game):
         callback_data=f'rob_kanxi_{game["rob_gold"]}_{game["user_id"]}_{game["target_user_id"]}')
     return InlineKeyboardMarkup([[flee_button, fight_button], [kanxi_button]])
 
-
 async def onlookers(call):
     # 围观群众
     game = rob_games[call.message.id]
@@ -346,13 +345,24 @@ async def onlookers(call):
         if kanxi_id not in game['kanxi_list']:
             game['kanxi_list'].append(kanxi_id)
             name_ = await get_fullname_with_link(kanxi_id)
-            game['kanxi_name'] += f"· {name_} 围观中…\n"
+
+            funny_watch_lines = [
+                f"· {name_} 正抱着瓜子围观中…",
+                f"· {name_} 偷偷打开了录像机…",
+                f"· {name_} 默默搬来小板凳…",
+                f"· {name_} 举起了打Call棒…",
+                f"· {name_} 高呼：来点猛的！",
+                f"· {name_} 靠在墙角边看边笑…",
+                f"· {name_} 正在做表情包素材采集…"
+            ]
+            funny_line = random.choice(funny_watch_lines)
+
+            game['kanxi_name'] += funny_line + "\n"
             await update_edit_message(call, game)
         else:
             await call.answer("❌ 您已经在围观了！", show_alert=False)
     else:
         await call.answer("❌ 您已经被盯上了！", show_alert=False)
-
 
 async def surrender(call, game_id):
     # 投降
@@ -372,7 +382,6 @@ async def surrender(call, game_id):
         # del rob_games[game_id]
     else:
         await call.answer("❌ 您只是围观群众！", show_alert=False)
-
 
 async def fighting(call, game_id):
     # 战斗
@@ -398,7 +407,7 @@ async def fighting(call, game_id):
                 if game["target_score"] > game["user_score"]:
                     # 确保惩罚不超过用户当前积分
                     actual_penalty = min(user.iv, FIGHT_PENALTY)
-                    message = f"{target_with_link} 最终赢得了斗争🏆\n{user_with_link} 失去 {actual_penalty} {sakura_b}😭"
+                    message = f"{target_with_link} 以 {game['target_score']} : {game['user_score']} 击败了乱世的盗贼\n{target_with_link} 最终赢得了斗争🏆\n{user_with_link} 失去 {actual_penalty} {sakura_b}😭"
                     success_msg = await bot.send_message(call.message.chat.id, message, reply_to_message_id=call.message.id)
                     asyncio.create_task(deleteMessage(success_msg, 180))
                     change_emby_amount(user.tg, user.iv - actual_penalty)
@@ -416,28 +425,28 @@ async def fighting(call, game_id):
                 elif game["target_score"] < game["user_score"]:
                     if target_user.iv < game['rob_gold']:
                         rob_gold = target_user.iv
-                        message = f"{target_with_link} 是个穷鬼全被抢走了🤡\n{user_with_link} 穷鬼也不放过抢走 {rob_gold} {sakura_b}🏆"
+                        message = f"乱世的盗贼以 {game['user_score']} : {game['target_score']} 抢劫成功\n{target_with_link} 是个穷鬼全被抢走了🤡\n{user_with_link} 穷鬼也不放过抢走 {rob_gold} {sakura_b}🏆"
                         await bot.send_message(
                             user.tg,
-                            f"🎉 抢劫成功\n\n乱世的盗贼抢劫成功\n获得：{rob_gold} {sakura_b}\n余额：{user.iv + rob_gold} {sakura_b}",
+                            f"🎉 抢劫成功\n\n乱世的盗贼以 {game['user_score']} : {game['target_score']} 抢劫成功\n获得：{rob_gold} {sakura_b}\n余额：{user.iv + rob_gold} {sakura_b}",
                             reply_to_message_id=call.message.id
                         )
                         await bot.send_message(
                             target_user.tg,
-                            f"😌 防守失败\n\n你未打赢乱世的盗贼\n损失：{rob_gold} {sakura_b}\n余额：0 {sakura_b}！",
+                            f"😌 防守失败\n\n你以 {game['target_score']} : {game['user_score']} 败给了乱世的盗贼\n损失：{rob_gold} {sakura_b}\n余额：0 {sakura_b}！",
                             reply_to_message_id=call.message.id
                         )
                     else:
                         rob_gold = game['rob_gold']
-                        message = f"{target_with_link} 最终反抗失败🤡\n{user_with_link} 抢走 {game['rob_gold']} {sakura_b}🏆"
+                        message = f"乱世的盗贼以 {game['user_score']} : {game['target_score']} 抢劫成功\n{target_with_link} 最终反抗失败🤡\n{user_with_link} 抢走 {game['rob_gold']} {sakura_b}🏆"
                         await bot.send_message(
                             user.tg,
-                            f"🎉 抢劫成功\n\n乱世的盗贼抢劫成功\n获得：{rob_gold} {sakura_b}\n余额：{user.iv + rob_gold} {sakura_b}",
+                            f"🎉 抢劫成功\n\n乱世的盗贼以 {game['user_score']} : {game['target_score']} 抢劫成功\n获得：{rob_gold} {sakura_b}\n余额：{user.iv + rob_gold} {sakura_b}",
                             reply_to_message_id=call.message.id
                         )
                         await bot.send_message(
                             target_user.tg,
-                            f"😌 防守失败\n\n你未打赢乱世的盗贼\n损失：{rob_gold} {sakura_b}\n余额：{target_user.iv - rob_gold} {sakura_b}",
+                            f"😌 防守失败\n\n你以 {game['target_score']} : {game['user_score']} 败给了乱世的盗贼\n损失：{rob_gold} {sakura_b}\n余额：{target_user.iv - rob_gold} {sakura_b}",
                             reply_to_message_id=call.message.id
                         )
 
@@ -467,7 +476,6 @@ async def fighting(call, game_id):
                 del rob_games[game_id]
     else:
         await call.answer("❌ 您只是围观群众！", show_alert=False)
-
 
 async def handle_kanxi_rewards(rob_game):
     kanxi_list = rob_game['kanxi_list']
@@ -522,7 +530,6 @@ async def handle_kanxi_rewards(rob_game):
         # 并发删除消息
         asyncio.create_task(deleteMessage(result, 180))
 
-
 @bot.on_callback_query(filters.regex(r"rob_"))
 async def handle_rob_callback(client, call):
     game_id = call.message.id
@@ -558,7 +565,6 @@ async def handle_rob_callback(client, call):
             await call.answer("❌ 处理请求时出错。", show_alert=True)
         finally:
             pass
-
 
 @bot.on_message(filters.command('rob', prefixes=prefixes) & filters.group)
 async def rob_user(_, message):
@@ -624,7 +630,6 @@ async def rob_user(_, message):
         reply_to_message_id=message.id
     )
     await start_rob(message, user, target_user)
-
 
 async def get_fullname_with_link(user_id):
     tg_info = await bot.get_users(user_id)
