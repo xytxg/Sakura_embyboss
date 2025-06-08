@@ -66,6 +66,7 @@ class BettingSystem:
 规则说明：
 1️⃣2️⃣3️⃣ 为小
 4️⃣5️⃣6️⃣ 为大
+数字由系统随机抽取
 
 参与方式：
 发送 /bet 大/小 金额
@@ -291,13 +292,7 @@ class BettingSystem:
                 user_link = await get_fullname_with_link(winner['tg_id'])
                 result_message += f"🏆 {user_link} 获得 {personal_reward} {sakura_b}\n"
         else:
-            result_message += "😅 没有获胜者，所有投注金额将退还\n"
-            # 退还所有投注
-            for participant in participants:
-                user = sql_get_emby(participant['user_id'])
-                if user:
-                    new_balance = user.iv + participant['amount']
-                    sql_update_emby(Emby.tg == participant['user_id'], iv=new_balance)
+            result_message += "😅 没有获胜者，投注金额不予退还\n"
         
         # 标记赌局结束
         bet_info['status'] = 0
@@ -330,15 +325,15 @@ class BettingSystem:
                         )
                     else:
                         new_balance = user.iv
-                        if not winners:  # 没有获胜者，全额退还的情况
+                        if not winners:
                             await bot.send_message(
                                 chat_id=participant['user_id'],
                                 text=f"😌 赌局开奖通知\n\n"
                                      f"本次无人中奖\n"
-                                     f"已退还：{participant['amount']} {sakura_b}\n"
+                                     f"投注金额不予退还\n"
                                      f"当前余额：{new_balance} {sakura_b}"
                             )
-                        else:  # 正常失败的情况
+                        else:
                             await bot.send_message(
                                 chat_id=participant['user_id'],
                                 text=f"😔 赌局开奖通知\n\n"
