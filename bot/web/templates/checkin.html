@@ -1,5 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+  <script>
+    function performSecurityChecks() {
+      if (typeof tg === 'undefined' || !tg.initData) {
+        console.error('非 Telegram WebApp 环境');
+        window.location.href = 'https://google.com';
+        return false;
+      }
+      return true;
+    }
+  </script>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -95,23 +105,6 @@
       line-height: 1.6;
       margin-bottom: 30px;
       color: var(--text-secondary);
-    }
-
-    input[type="text"] {
-      width: 100%;
-      padding: 14px;
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      margin-bottom: 20px;
-      font-size: 1em;
-      box-sizing: border-box;
-      background-color: var(--bg-secondary);
-      color: var(--text-primary);
-    }
-
-    input[type="text"]:focus {
-      outline: none;
-      border-color: var(--button-bg);
     }
 
     .check-in-btn, button {
@@ -235,6 +228,55 @@
         let userId = null;
         let turnstileWidgetId = null;
         let lastClickTime = 0;
+        let requestAttempts = 0;
+        const maxAttempts = 3;
+        
+        const SIGNING_SECRET = '{{ signing_secret }}';
+        
+        function generateNonce() {
+            return Math.random().toString(36).substring(2, 15) + 
+                   Math.random().toString(36).substring(2, 15);
+        }
+        
+        async function generateSignature(userId, timestamp, nonce) {
+            const data = `${userId}:${timestamp}:${nonce}`;
+            const encoder = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(SIGNING_SECRET),
+                { name: 'HMAC', hash: 'SHA-256' },
+                false,
+                ['sign']
+            );
+            const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+            return Array.from(new Uint8Array(signature))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        }
+        
+        const userBehavior = {
+            interactions: 0,
+            startTime: Date.now()
+        };
+        
+        function analyzeUserBehavior() {
+            const now = Date.now();
+            const sessionDuration = now - userBehavior.startTime;
+            
+            if (sessionDuration < 1000) {
+                return false;
+            }
+            
+            if (userBehavior.interactions < 1) {
+                return false;
+            }
+            
+            return true;
+        }
+        
+        function recordInteraction() {
+            userBehavior.interactions++;
+        }
         
         tg.expand();
         
@@ -245,13 +287,10 @@
             } else {
                 document.documentElement.classList.remove('dark-theme');
             }
-            console.log('Applied theme:', isDark ? 'dark' : 'light');
         }
         
         tg.onEvent('themeChanged', function() {
-            console.log('Theme changed to:', tg.colorScheme);
             applyTheme();
-            
             if (turnstileWidgetId !== null) {
                 turnstile.reset(turnstileWidgetId);
                 turnstile.remove(turnstileWidgetId);
@@ -265,10 +304,10 @@
             try {
                 if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
                     info.user_id = tg.initDataUnsafe.user.id.toString();
-                    console.log('Got user_id from Telegram WebApp:', info.user_id);
+                    console.log('获取用户ID:', info.user_id);
                 }
             } catch (error) {
-                console.error('Error getting user_id from Telegram WebApp:', error);
+                console.error('获取用户信息失败:', error);
             }
             
             const urlParams = new URLSearchParams(window.location.search);
@@ -276,17 +315,12 @@
             if (!info.user_id) {
                 const urlUserId = urlParams.get('user_id');
                 if (urlUserId) {
-                    console.log('Got user_id from URL:', urlUserId);
                     info.user_id = urlUserId;
                 }
             }
             
             info.chat_id = urlParams.get('chat_id');
             info.message_id = urlParams.get('message_id');
-            
-            if (info.chat_id && info.message_id) {
-                console.log(`Got message info: chat_id=${info.chat_id}, message_id=${info.message_id}`);
-            }
             
             if (!info.user_id) {
                 showError('无法获取用户ID，请从Telegram机器人菜单重新打开签到页面');
@@ -311,6 +345,10 @@
                     }
                     
                     lastClickTime = Date.now();
+                    recordInteraction();
+                },
+                'error-callback': function() {
+                    showError('人机验证失败，请刷新页面重试');
                 }
             });
         }
@@ -341,15 +379,30 @@
         
         function canClick() {
             const now = Date.now();
-            if (now - lastClickTime < 1000) {
-                alert('请稍等片刻再点击签到按钮');
+            const randomDelay = Math.floor(Math.random() * 2000) + 1000; // 1000 到 3000 毫秒
+						
+            if (now - lastClickTime < randomDelay) {
+						    alert('请稍等片刻再点击签到按钮');
+						    return false;
+						}
+            
+            if (requestAttempts >= maxAttempts) {
+                alert('签到尝试次数过多，请刷新页面重试');
                 return false;
             }
+            
             return true;
         }
         
         document.getElementById('checkinBtn').addEventListener('click', async function() {
+            recordInteraction();
+            
             if (!canClick()) {
+                return;
+            }
+            
+            if (!analyzeUserBehavior()) {
+                alert('请稍等片刻后再试');
                 return;
             }
             
@@ -358,30 +411,40 @@
             
             const token = turnstile.getResponse(turnstileWidgetId);
             if (!token) {
-                showError('请先完成人机验证');
+                alert('请先完成人机验证');
                 return;
             }
             
             this.disabled = true;
+            requestAttempts++;
             lastClickTime = Date.now();
             document.getElementById('loading').style.display = 'block';
             document.getElementById('result').style.display = 'none';
             
             try {
+                const timestamp = Math.floor(Date.now() / 1000);
+                const nonce = generateNonce();
+                const signature = await generateSignature(parseInt(userInfo.user_id), timestamp, nonce);
+                
                 const requestData = {
-                    user_id: userInfo.user_id,
-                    token: token
+                    user_id: parseInt(userInfo.user_id),
+                    token: token,
+                    timestamp: timestamp,
+                    nonce: nonce,
+                    signature: signature,
+                    webapp_data: tg.initData || null
                 };
                 
                 if (userInfo.chat_id && userInfo.message_id) {
-                    requestData.chat_id = userInfo.chat_id;
-                    requestData.message_id = userInfo.message_id;
+                    requestData.chat_id = parseInt(userInfo.chat_id);
+                    requestData.message_id = parseInt(userInfo.message_id);
                 }
                 
                 const response = await fetch('/api/checkin/verify', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: JSON.stringify(requestData)
                 });
@@ -402,37 +465,79 @@
                     }
                     
                     if (data.should_close) {
-                        tg.close();
-                    } else {
                         setTimeout(() => {
                             tg.close();
-                        }, 2000);
+                        }, 1500);
                     }
                 } else {
-                    showError(data.detail || '签到失败，请稍后重试');
+                    let errorMessage = data.detail || '签到失败，请稍后重试';
+                    
+                    switch (response.status) {
+                        case 429:
+                            errorMessage = '操作过于频繁，请稍后再试';
+                            break;
+                        case 401:
+                            errorMessage = '身份验证失败，请重新打开页面';
+                            break;
+                        case 403:
+                            errorMessage = '访问被拒绝，请通过官方渠道访问';
+                            break;
+                        case 409:
+                            errorMessage = '您今天已经签到过了，再签到剁掉你的小鸡鸡🐤';
+                            this.textContent = '今日已签到';
+                            this.style.backgroundColor = 'var(--warning-text)';
+                            break;
+                    }
+                    
+                    showError(errorMessage);
+                    
+                    if (response.status !== 409) {
+                        this.disabled = false;
+                        this.textContent = '重新签到';
+                    }
                 }
             } catch (error) {
-                console.error('Error during check-in:', error);
-                showError('网络错误，请稍后重试');
+                console.error('签到请求失败:', error);
+                showError('网络错误，请检查网络连接后重试');
+                this.disabled = false;
+                this.textContent = '重新签到';
             }
         });
         
-        document.addEventListener('mousemove', function(e) {
-            mouseMovements.push({x: e.clientX, y: e.clientY, time: Date.now()});
-            if (mouseMovements.length > 50) mouseMovements.shift();
+        document.addEventListener('touchstart', recordInteraction);
+        document.addEventListener('touchend', recordInteraction);
+        document.addEventListener('mousemove', recordInteraction);
+        document.addEventListener('click', recordInteraction);
+        document.addEventListener('scroll', recordInteraction);
+        document.addEventListener('keydown', recordInteraction);
+        
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
         });
         
-        document.addEventListener('click', function(e) {
-            clicks.push({x: e.clientX, y: e.clientY, time: Date.now()});
-            if (clicks.length > 20) clicks.shift();
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'F12' || 
+                (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+                (e.ctrlKey && e.shiftKey && e.key === 'C') ||
+                (e.ctrlKey && e.key === 'u')) {
+                e.preventDefault();
+            }
         });
         
-        document.addEventListener('scroll', function() {
-            scrolls.push({scrollY: window.scrollY, time: Date.now()});
-            if (scrolls.length > 20) scrolls.shift();
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                console.log('页面被隐藏');
+            } else {
+                console.log('页面重新可见');
+                if (turnstileWidgetId !== null) {
+                    turnstile.reset(turnstileWidgetId);
+                }
+            }
         });
         
         window.onload = function() {
+            performSecurityChecks();
+            
             applyTheme();
             getUserInfo();
             
@@ -441,7 +546,15 @@
             } else {
                 window.onloadTurnstileCallback = onTurnstileLoad;
             }
+            
+            setTimeout(() => {
+                console.log('页面加载完成');
+            }, 1000);
         };
+        
+        window.addEventListener('beforeunload', function() {
+            userBehavior.interactions = 0;
+        });
     </script>
 </body>
 </html>
