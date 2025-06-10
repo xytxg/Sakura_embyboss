@@ -282,7 +282,7 @@ async def verify_checkin(
         LOGGER.error(f"数据库更新失败: {e}")
         raise HTTPException(status_code=500, detail="签到处理失败，请重试")
     
-    LOGGER.info(f"签到成功 - 用户: {request_data.user_id}, 奖励: {reward}, IP: {client_ip}")
+    LOGGER.info(f"签到成功 - 用户: {request_data.user_id}, 奖励: {reward} {sakura_b}, IP: {client_ip}")
     
     # 构建签到成功消息
     checkin_text = f'🎉 **签到成功** | {reward} {sakura_b}\n💴 **当前持有** | {new_balance} {sakura_b}\n⏳ **签到日期** | {now.strftime("%Y-%m-%d")}'
