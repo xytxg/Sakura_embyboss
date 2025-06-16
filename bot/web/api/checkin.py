@@ -87,7 +87,7 @@ def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
         
         return parsed_data
     except Exception as e:
-        LOGGER.error(f"Telegram WebApp数据验证失败: {e}")
+        LOGGER.error(f"❌ Telegram WebApp数据验证失败: {e}")
         raise HTTPException(status_code=401, detail="数据验证失败")
 
 def generate_request_signature(user_id: int, timestamp: int, nonce: str) -> str:
@@ -150,7 +150,7 @@ def detect_suspicious_behavior(request: Request, user_agent: str) -> bool:
     """检测可疑行为 - 放宽检测条件"""
     # 基本的User-Agent检查
     if not user_agent or len(user_agent) < 5:
-        LOGGER.info(f"可疑请求：User-Agent过短或缺失: {user_agent}")
+        LOGGER.info(f"❌ 可疑请求：User-Agent过短或缺失: {user_agent}")
         return True
     
     # 检查是否为明显的机器人UA
@@ -161,14 +161,14 @@ def detect_suspicious_behavior(request: Request, user_agent: str) -> bool:
     ua_lower = user_agent.lower()
     for pattern in suspicious_ua_patterns:
         if pattern in ua_lower:
-            LOGGER.info(f"可疑请求：检测到机器人User-Agent: {user_agent}")
+            LOGGER.info(f"❌ 可疑请求：检测到机器人User-Agent: {user_agent}")
             return True
     
     # 检查基本的请求头
     required_headers = ["host", "user-agent"]
     for header in required_headers:
         if header not in request.headers:
-            LOGGER.info(f"可疑请求：缺少必要请求头: {header}")
+            LOGGER.info(f"❌ 可疑请求：缺少必要请求头: {header}")
             return True
     
     return False
@@ -194,7 +194,7 @@ async def verify_checkin(
 ):
     """验证签到"""
     client_ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.client.host
-    LOGGER.info(f"签到请求 - 用户: {request_data.user_id}, IP: {client_ip}, UA: {user_agent}")
+    LOGGER.info(f"📅 签到请求 - 用户: {request_data.user_id}, IP: {client_ip}, UA: {user_agent}")
     
     # 检查签到功能是否开启
     if not _open.checkin:
@@ -202,11 +202,12 @@ async def verify_checkin(
     
     # 检测可疑行为
     if detect_suspicious_behavior(request, user_agent):
-        LOGGER.info(f"检测到可疑行为 - 用户: {request_data.user_id}, IP: {client_ip}")
+        LOGGER.info(f"❌ 检测到可疑行为 - 用户: {request_data.user_id}, IP: {client_ip}")
         raise HTTPException(status_code=403, detail="请求被拒绝")
     
     # 验证请求时效性和唯一性
     if not verify_request_freshness(request_data.timestamp, request_data.nonce):
+        LOGGER.info(f"❌ 请求无效或已过期 - 用户: {request_data.user_id}, IP: {client_ip}, 时间戳: {request_data.timestamp}, 当前时间: {datetime.now().isoformat()}, Nonce: {request_data.nonce}")
         raise HTTPException(status_code=400, detail="请求无效或已过期")
     
     # 验证请求签名
@@ -216,12 +217,12 @@ async def verify_checkin(
         request_data.nonce, 
         request_data.signature
     ):
-        LOGGER.info(f"签名验证失败 - 用户: {request_data.user_id}")
+        LOGGER.info(f"❌ 签名验证失败 - 用户: {request_data.user_id}")
         raise HTTPException(status_code=401, detail="请求验证失败")
     
     # 检查频率限制
     if not check_rate_limit(request_data.user_id):
-        LOGGER.info(f"频率限制触发 - 用户: {request_data.user_id}")
+        LOGGER.info(f"❌ 频率限制触发 - 用户: {request_data.user_id}")
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
     
     # 验证Telegram WebApp数据
@@ -234,7 +235,7 @@ async def verify_checkin(
         except HTTPException:
             raise
         except Exception as e:
-            LOGGER.error(f"WebApp数据验证错误: {e}")
+            LOGGER.error(f"❌ WebApp数据验证错误: {e}")
             raise HTTPException(status_code=401, detail="身份验证失败")
     
     # 检查用户是否存在
@@ -257,10 +258,10 @@ async def verify_checkin(
                 result = await response.json()
                 if not result.get("success", False):
                     error_codes = result.get("error-codes", [])
-                    LOGGER.info(f"Turnstile验证失败 - 用户: {request_data.user_id}, 错误: {error_codes}, IP: {client_ip}")
+                    LOGGER.info(f"❌ Turnstile验证失败 - 用户: {request_data.user_id}, 错误: {error_codes}, IP: {client_ip}")
                     raise HTTPException(status_code=400, detail="人机验证失败，请重试")
         except aiohttp.ClientError as e:
-            LOGGER.error(f"Turnstile验证网络错误: {e}")
+            LOGGER.error(f"❌ Turnstile验证网络错误: {e}")
             raise HTTPException(status_code=503, detail="验证服务暂时不可用")
     
     # 处理签到逻辑
@@ -282,7 +283,7 @@ async def verify_checkin(
         LOGGER.error(f"数据库更新失败: {e}")
         raise HTTPException(status_code=500, detail="签到处理失败，请重试")
     
-    LOGGER.info(f"签到成功 - 用户: {request_data.user_id}, 奖励: {reward} {sakura_b}, IP: {client_ip}")
+    LOGGER.info(f"✔️ 签到成功 - 用户: {request_data.user_id}, 奖励: {reward} {sakura_b}, IP: {client_ip}")
     
     # 构建签到成功消息
     checkin_text = f'🎉 **签到成功** | {reward} {sakura_b}\n💴 **当前持有** | {new_balance} {sakura_b}\n⏳ **签到日期** | {now.strftime("%Y-%m-%d")}'
@@ -299,7 +300,7 @@ async def verify_checkin(
                     message_ids=request_data.message_id
                 )
             except Exception as e:
-                LOGGER.error(f"删除面板消息失败: {e}")
+                LOGGER.error(f"❌ 删除面板消息失败: {e}")
         
         # 发送签到成功消息
         await bot.send_message(
@@ -307,7 +308,7 @@ async def verify_checkin(
             text=checkin_text
         )
     except Exception as e:
-        LOGGER.error(f"发送消息失败: {e}")
+        LOGGER.error(f"❌ 发送消息失败: {e}")
     
     return JSONResponse({
         "success": True,
