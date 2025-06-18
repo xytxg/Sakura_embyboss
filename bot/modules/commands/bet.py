@@ -147,7 +147,8 @@ class BettingSystem:
                 # 计算当前赔率
                 odds_info = self._calculate_odds(bet_info)
                 
-                return f"""✅ 追加投注成功！
+                user_link = await get_fullname_with_link(user_id)
+                return f"""✅ {user_link} 追加投注成功！
 
 投注类型：{bet_type}
 追加金额：{amount_int} {sakura_b}
@@ -195,7 +196,8 @@ class BettingSystem:
                 # 计算当前赔率
                 odds_info = self._calculate_odds(bet_info)
                 
-                return f"""✅ 投注成功！
+                user_link = await get_fullname_with_link(user_id)
+                return f"""✅ {user_link} 投注成功！
 
 投注类型：{bet_type}
 投注金额：{amount_int} {sakura_b}
@@ -397,6 +399,7 @@ async def handle_bet_command(client, message):
         except:
             pass
         return
+    asyncio.create_task(deleteMessage(message, 0))
     try:
         # 解析命令参数: /bet 大/小 金额
         parts = message.text.split()
