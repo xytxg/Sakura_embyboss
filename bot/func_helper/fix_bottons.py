@@ -26,10 +26,12 @@ def judge_start_ikb(is_admin: bool, account: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🎟️ 使用注册码", callback_data="exchange"),
             InlineKeyboardButton("👑 创建账户", callback_data="create")
         ])
-        buttons.append([
-            InlineKeyboardButton("⭕ 换绑TG", callback_data="changetg"),
-            InlineKeyboardButton("🔍 绑定TG", callback_data="bindtg")
-        ])
+
+        tg_buttons = [InlineKeyboardButton("⭕ 换绑TG", callback_data="changetg")]
+        if  _open.bindtg:
+            tg_buttons.append(InlineKeyboardButton("🔍 绑定TG", callback_data="bindtg"))
+        buttons.append(tg_buttons)
+
         if _open.invite_lv == 'd':
             buttons.append([InlineKeyboardButton("🏪 兑换商店", callback_data="storeall")])
     else:

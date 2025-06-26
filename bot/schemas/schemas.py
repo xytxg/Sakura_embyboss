@@ -51,6 +51,7 @@ class Open(BaseModel):
     invite_lv: Optional[str] = 'b'
     leave_ban: bool
     uplays: bool = True
+    bindtg: bool = True
     checkin_reward: Optional[List[int]] = [1, 10]
     exchange_cost: int = 300
     whitelist_cost: int = 9999
