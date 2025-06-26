@@ -292,6 +292,9 @@ async def change_tg(_, call):
 
 @bot.on_callback_query(filters.regex('bindtg') & user_in_group_on_filter)
 async def bind_tg(_, call):
+    if not getattr(_open, "bindtg", False):
+        await call.answer("⚠️ 绑定TG功能已关闭", show_alert=True)
+        return
     d = sql_get_emby(tg=call.from_user.id)
     if d.embyid is not None:
         return await callAnswer(call, '⚖️ 您已经拥有账户，请不要钻空子', True)
