@@ -53,14 +53,17 @@ class BettingSystem:
         
         self.active_bets[chat_id] = bet_info
         self.participants[bet_id] = []
-        
-        # 5分钟后自动开奖
+
         asyncio.create_task(self._auto_draw(chat_id, bet_id))
-        
+
+        user_link = await get_fullname_with_link(user_id)
+
         random_method = 'Telegram骰子' if random_type == 'dice' else '系统随机'
         
         return f"""🎲 新的赌局已开始！
 
+发起者：{user_link}
+手续费：{game.magnification} {sakura_b}
 随机方式：{random_method}
 
 规则说明：
@@ -381,7 +384,6 @@ async def handle_startbet_command(client, message):
     # 扣除手续费
     new_balance = user.iv - game.magnification
     sql_update_emby(Emby.tg == user_id, iv=new_balance)
-    await message.reply_text(f"✅ 发起者已扣除 {game.magnification} {sakura_b} 手续费")
 
     await bot.send_message(
         chat_id=user_id,
