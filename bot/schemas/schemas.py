@@ -119,6 +119,13 @@ class CloudflareTurnstile(BaseModel):
     site_key: Optional[str] = ""
     secret_key: Optional[str] = ""
 
+class RedisConfig(BaseModel):
+    host: Optional[str] = "localhost"
+    port: Optional[int] = 6379
+    db: Optional[int] = 5
+    password: Optional[str] = ""
+    decode_responses:  bool = True
+
 class API(BaseModel):
     status: bool = False  # 默认关闭
     http_url: Optional[str] = "0.0.0.0"
@@ -126,6 +133,8 @@ class API(BaseModel):
     webapp_url: Optional[str] = ""
     allow_origins: Optional[List[Union[str, int]]] = None
     cloudflare_turnstile: Optional[CloudflareTurnstile] = Field(default_factory=CloudflareTurnstile)
+    singing_secret: Optional[str] = "dCQ9Su6Bez3pQCY6TPiz4Dx69sGWVyVtBBI7sZ3b1zCkqMAZhi"
+    redis: Optional[RedisConfig] = Field(default_factory=RedisConfig)
 
     def __init__(self, **data):
         super().__init__(**data)

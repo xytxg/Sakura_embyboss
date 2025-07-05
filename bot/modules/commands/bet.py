@@ -65,6 +65,7 @@ class BettingSystem:
 发起者：{user_link}
 手续费：{game.magnification} {sakura_b}
 随机方式：{random_method}
+开奖时间：{bet_info['end_time'].strftime('%H:%M:%S')}
 
 规则说明：
 1️⃣2️⃣3️⃣ 为小
@@ -75,8 +76,7 @@ class BettingSystem:
 发送 /bet 大/小 金额
 例如：/bet 小 10
 
-赔率说明：奖池为总投注额的95%，按赢家投注比例分配
-本局将在5分钟后自动开奖"""
+赔率说明：奖池为总投注额的95%，按赢家投注比例分配"""
     
     async def place_bet(self, chat_id: int, user_id: int, bet_type: str, amount: str) -> str:
         """参与赌局"""
@@ -155,9 +155,8 @@ class BettingSystem:
 
 投注类型：{bet_type}
 追加金额：{amount_int} {sakura_b}
-总投注额：{int(existing_participant['amount'])} {sakura_b}
-开奖时间：{bet_info['end_time'].strftime('%H:%M:%S')}
-
+总投注额：{int(existing_participant["amount"])} {sakura_b}
+开奖时间：{bet_info["end_time"].strftime("%H:%M:%S")}
 当前赔率：
 大：{odds_info['big_odds']:.2f}倍
 小：{odds_info['small_odds']:.2f}倍
@@ -204,8 +203,7 @@ class BettingSystem:
 
 投注类型：{bet_type}
 投注金额：{amount_int} {sakura_b}
-开奖时间：{bet_info['end_time'].strftime('%H:%M:%S')}
-
+开奖时间：{bet_info["end_time"].strftime("%H:%M:%S")}
 当前赔率：
 大：{odds_info['big_odds']:.2f}倍
 小：{odds_info['small_odds']:.2f}倍
@@ -277,7 +275,7 @@ class BettingSystem:
         # 分配奖励
         total_winner_amount = sum(p['amount'] for p in winners)
         
-        result_message = f"""🎲 开奖结果：{result} ({winning_type})
+        result_message = f"""🎲 赌局开奖结果：{result} ({winning_type})
 
 """
         
@@ -308,7 +306,8 @@ class BettingSystem:
             del self.participants[bet_id]
         # 发送开奖消息
         try:
-            await bot.send_message(chat_id, result_message)
+            result_msg_obj = await bot.send_message(chat_id, result_message)
+            asyncio.create_task(deleteMessage(result_msg_obj, 180))
         except:
             pass
             
@@ -373,12 +372,14 @@ async def handle_startbet_command(client, message):
 
     user = sql_get_emby(user_id)
     if not user or not user.embyid:
-        await message.reply_text("❌ 您还未注册Emby账户")
+        error_message = await message.reply_text("❌ 您还未注册Emby账户")
+        asyncio.create_task(deleteMessage(error_message, 360))
         return
 
     # 检查用户金币是否足够支付手续费
     if user.iv < game.magnification:
-        await message.reply_text(f"❌ 你的余额不够支付 {game.magnification} {sakura_b} 手续费哦～")
+        error_message = await message.reply_text(f"❌ 你的余额不够支付 {game.magnification} {sakura_b} 手续费哦～")
+        asyncio.create_task(deleteMessage(error_message, 60))
         return
 
     # 扣除手续费
@@ -391,8 +392,8 @@ async def handle_startbet_command(client, message):
     )
 
     result = await betting_system.start_bet(chat_id, user_id, message_text)
-    await message.reply_text(result)
-
+    bet_start_message = await message.reply_text(result)
+    asyncio.create_task(deleteMessage(bet_start_message, 60))
 @bot.on_message(filters.command('bet', prefixes=prefixes) & filters.group)
 async def handle_bet_command(client, message):
     if not game.bet_open:
@@ -406,7 +407,8 @@ async def handle_bet_command(client, message):
         # 解析命令参数: /bet 大/小 金额
         parts = message.text.split()
         if len(parts) < 3:
-            await message.reply_text("❌ 格式错误！请使用：/bet 大/小 金额")
+            bet_reply_message = await message.reply_text("❌ 格式错误！请使用：/bet 大/小 金额")
+            asyncio.create_task(deleteMessage(bet_reply_message, 60))
             return
         
         bet_type = parts[1]
@@ -416,7 +418,8 @@ async def handle_bet_command(client, message):
         user_id = message.from_user.id
         
         result = await betting_system.place_bet(chat_id, user_id, bet_type, amount)
-        await message.reply_text(result)
-        
+        bet_reply_message = await message.reply_text(result)
+        asyncio.create_task(deleteMessage(bet_reply_message, 60))        
     except Exception as e:
-        await message.reply_text("❌ 命令处理失败，请检查格式")
+        error_message = await message.reply_text("❌ 命令处理失败，请检查格式")
+        asyncio.create_task(deleteMessage(error_message, 60))

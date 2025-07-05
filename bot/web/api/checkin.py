@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import time
 import json
-import secrets
+import redis
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -20,25 +20,49 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from redis.exceptions import ConnectionError as RedisConnectionError
 
-from bot import _open, bot_token, LOGGER, api as config_api, sakura_b 
+from bot import _open, bot_token, LOGGER, api as config_api, sakura_b
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
 # ==================== 路由与模板设置 ====================
-route = APIRouter(prefix="/checkin")
+route = APIRouter(prefix="/checkin" )
 templates_path = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_path))
 
 # ==================== 配置参数 ====================
-TURNSTILE_SITE_KEY = config_api.cloudflare_turnstile.site_key or "YOUR_TURNSTILE_SITE_KEY"
-TURNSTILE_SECRET_KEY = config_api.cloudflare_turnstile.secret_key or "YOUR_TURNSTILE_SECRET_KEY"
-SIGNING_SECRET = secrets.token_urlsafe(32)
+TURNSTILE_SITE_KEY = config_api.cloudflare_turnstile.site_key
+TURNSTILE_SECRET_KEY = config_api.cloudflare_turnstile.secret_key
+
+SIGNING_SECRET = config_api.singing_secret
+
 MAX_REQUEST_AGE = 30
 RATE_LIMIT_WINDOW = 30
 MAX_REQUESTS_PER_HOUR = 3
 
+REDIS_HOST = config_api.redis.host
+REDIS_PORT = config_api.redis.port
+REDIS_DB = config_api.redis.db
+REDIS_PASSWORD = config_api.redis.password
+DECODE_RESPONSES = config_api.redis.decode_responses
+
+redis_client = None
+try:
+    redis_client = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=REDIS_DB,
+        password=REDIS_PASSWORD,
+        decode_responses=DECODE_RESPONSES
+    )
+    redis_client.ping()
+    LOGGER.info("✅ Redis 连接成功！")
+except (RedisConnectionError, redis.exceptions.ResponseError) as e:
+    LOGGER.warning(f"❌ Redis 连接或认证失败: {e}. 将使用内存存储 Nonce。")
+    redis_client = None
+
 request_records: Dict[int, list] = {}
-used_nonces: set = set()
+memory_used_nonces: set = set()
 
 # ==================== 请求模型 ====================
 class CheckinVerifyRequest(BaseModel):
@@ -48,7 +72,6 @@ class CheckinVerifyRequest(BaseModel):
     message_id: Optional[int] = None
     timestamp: int
     nonce: str
-    signature: str
     webapp_data: Optional[str] = None
 
 # ==================== 工具函数 ====================
@@ -74,21 +97,13 @@ def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
             raise HTTPException(status_code=401, detail="Telegram数据验证失败")
 
         auth_date = int(parsed_data.get('auth_date', 0))
-        if time.time() - auth_date > 86400:
+        if time.time() - auth_date > 3600:
             raise HTTPException(status_code=401, detail="认证数据过期")
 
         return parsed_data
     except Exception as e:
         LOGGER.error(f"❌ Telegram WebApp数据验证失败: {e}")
         raise HTTPException(status_code=401, detail="数据验证失败")
-
-def generate_request_signature(user_id: int, timestamp: int, nonce: str) -> str:
-    data = f"{user_id}:{timestamp}:{nonce}"
-    return hmac.new(SIGNING_SECRET.encode(), data.encode(), hashlib.sha256).hexdigest()
-
-def verify_request_signature(user_id: int, timestamp: int, nonce: str, signature: str) -> bool:
-    expected_signature = generate_request_signature(user_id, timestamp, nonce)
-    return hmac.compare_digest(signature, expected_signature)
 
 def check_rate_limit(user_id: int) -> bool:
     now = time.time()
@@ -101,43 +116,68 @@ def check_rate_limit(user_id: int) -> bool:
     return True
 
 def verify_request_freshness(timestamp: int, nonce: str) -> bool:
-    global used_nonces
+    global redis_client
+    global memory_used_nonces
+
     current_time = time.time()
     if abs(current_time - timestamp) > MAX_REQUEST_AGE:
         return False
-    nonce_key = f"{timestamp}:{nonce}"
-    if nonce_key in used_nonces:
-        return False
-    used_nonces.add(nonce_key)
-    expired = {n for n in used_nonces if current_time - int(n.split(':')[0]) > MAX_REQUEST_AGE}
-    used_nonces -= expired
-    return True
+
+    nonce_key = f"nonce:{timestamp}:{nonce}"
+
+    if redis_client:
+        try:
+            if not redis_client.setnx(nonce_key, 1):
+                return False
+            redis_client.expire(nonce_key, MAX_REQUEST_AGE)
+            return True
+        except (RedisConnectionError, redis.exceptions.ResponseError) as e:
+            LOGGER.warning(f"❌ Redis 操作失败: {e}. 回退到内存 Nonce 检查。")
+            redis_client = None
+            if nonce_key in memory_used_nonces:
+                return False
+            memory_used_nonces.add(nonce_key)
+            expired = {n for n in memory_used_nonces if current_time - int(n.split(':')[1]) > MAX_REQUEST_AGE}
+            memory_used_nonces -= expired
+            return True
+    else:
+        if nonce_key in memory_used_nonces:
+            return False
+        memory_used_nonces.add(nonce_key)
+        expired = {n for n in memory_used_nonces if current_time - int(n.split(':')[1]) > MAX_REQUEST_AGE}
+        memory_used_nonces -= expired
+        return True
 
 def detect_suspicious_behavior(request: Request, user_agent: str) -> bool:
-    if not user_agent or len(user_agent) < 5:
+    if not user_agent or len(user_agent) < 10:
         LOGGER.info(f"❌ 可疑请求：User-Agent过短或缺失: {user_agent}")
         return True
-    for pattern in ['bot', 'crawler', 'spider', 'scraper', 'wget', 'curl']:
-        if pattern in user_agent.lower():
+    for pattern in ['bot', 'crawler', 'spider', 'scraper', 'wget', 'curl', 'python-requests', 'aiohttp', 'okhttp']:
+        if pattern in user_agent.lower( ):
             LOGGER.info(f"❌ 可疑请求：检测到机器人User-Agent: {user_agent}")
             return True
-    for header in ["host", "user-agent"]:
+    required_headers = ["host", "user-agent", "accept", "accept-language"]
+    for header in required_headers:
         if header not in request.headers:
             LOGGER.info(f"❌ 可疑请求：缺少必要请求头: {header}")
             return True
+    referer = request.headers.get("referer")
+    if not referer or f"//{request.url.netloc}/api/checkin/web" not in referer:
+        LOGGER.info(f"❌ 可疑请求：Referer异常或缺失: {referer}" )
+        return True
     return False
 
 # ==================== 路由处理 ====================
 @route.get("/web", response_class=HTMLResponse)
 async def checkin_page(request: Request):
     return templates.TemplateResponse(
-        "checkin.html", 
-        {"request": request, "site_key": TURNSTILE_SITE_KEY, "signing_secret": SIGNING_SECRET}
+        "checkin.html",
+        {"request": request, "site_key": TURNSTILE_SITE_KEY}
     )
 
 @route.post("/verify")
 async def verify_checkin(
-    request_data: CheckinVerifyRequest, 
+    request_data: CheckinVerifyRequest,
     request: Request,
     user_agent: str = Header(None),
     x_forwarded_for: str = Header(None)
@@ -156,12 +196,6 @@ async def verify_checkin(
         LOGGER.info(f"❌ 请求无效或已过期 - 用户: {request_data.user_id}, IP: {client_ip}, 时间戳: {request_data.timestamp}, 当前时间: {datetime.now().isoformat()}, Nonce: {request_data.nonce}")
         raise HTTPException(status_code=400, detail="请求无效或已过期")
 
-    if not verify_request_signature(
-        request_data.user_id, request_data.timestamp, request_data.nonce, request_data.signature
-    ):
-        LOGGER.info(f"❌ 签名验证失败 - 用户: {request_data.user_id}")
-        raise HTTPException(status_code=401, detail="请求验证失败")
-
     if not check_rate_limit(request_data.user_id):
         LOGGER.info(f"❌ 频率限制触发 - 用户: {request_data.user_id}")
         raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
@@ -178,11 +212,7 @@ async def verify_checkin(
             LOGGER.error(f"❌ WebApp数据验证错误: {e}")
             raise HTTPException(status_code=401, detail="身份验证失败")
 
-    e = sql_get_emby(request_data.user_id)
-    if not e:
-        raise HTTPException(status_code=404, detail="未查询到用户数据")
-
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession( ) as session:
         try:
             async with session.post(
                 "https://challenges.cloudflare.com/turnstile/v0/siteverify",
@@ -191,7 +221,7 @@ async def verify_checkin(
                     "response": request_data.token,
                     "remoteip": client_ip
                 },
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=10 )
             ) as response:
                 result = await response.json()
                 if not result.get("success", False):
@@ -199,8 +229,12 @@ async def verify_checkin(
                     LOGGER.info(f"❌ Turnstile验证失败 - 用户: {request_data.user_id}, 错误: {error_codes}, IP: {client_ip}")
                     raise HTTPException(status_code=400, detail="人机验证失败，请重试")
         except aiohttp.ClientError as e:
-            LOGGER.error(f"❌ Turnstile验证网络错误: {e}")
+            LOGGER.error(f"❌ Turnstile验证网络错误: {e}" )
             raise HTTPException(status_code=503, detail="验证服务暂时不可用")
+
+    e = sql_get_emby(request_data.user_id)
+    if not e:
+        raise HTTPException(status_code=404, detail="未查询到用户数据")
 
     now = datetime.now(timezone(timedelta(hours=8)))
     today = now.strftime("%Y-%m-%d")

@@ -209,16 +209,15 @@
 <body>
     <div class="container">
         <div class="title">每日签到</div>
-        <p>点击按钮完成签到，获取币子奖励！</p>
-        
+        <p>点击按钮完成签到 ，获取币子奖励！</p>
         <div class="turnstile-container" id="turnstile-container"></div>
-        
+
         <button id="checkinBtn" class="check-in-btn" disabled>请先完成人机验证</button>
-        
+
         <div class="network-tip">
             💡 无法签到？请检查网络或尝试更换代理重新打开页面
         </div>
-        
+
         <div class="loading" id="loading">签到中，请稍候...</div>
         <div class="result" id="result"></div>
     </div>
@@ -230,56 +229,38 @@
         let lastClickTime = 0;
         let requestAttempts = 0;
         const maxAttempts = 3;
-        
-        const SIGNING_SECRET = '{{ signing_secret }}';
-        
+
         function generateNonce() {
-            return Math.random().toString(36).substring(2, 15) + 
+            return Math.random().toString(36).substring(2, 15) +
                    Math.random().toString(36).substring(2, 15);
         }
-        
-        async function generateSignature(userId, timestamp, nonce) {
-            const data = `${userId}:${timestamp}:${nonce}`;
-            const encoder = new TextEncoder();
-            const key = await crypto.subtle.importKey(
-                'raw',
-                encoder.encode(SIGNING_SECRET),
-                { name: 'HMAC', hash: 'SHA-256' },
-                false,
-                ['sign']
-            );
-            const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
-            return Array.from(new Uint8Array(signature))
-                .map(b => b.toString(16).padStart(2, '0'))
-                .join('');
-        }
-        
+
         const userBehavior = {
             interactions: 0,
             startTime: Date.now()
         };
-        
+
         function analyzeUserBehavior() {
             const now = Date.now();
             const sessionDuration = now - userBehavior.startTime;
-            
-            if (sessionDuration < 1000) {
+
+            if (sessionDuration < 1000) { 
                 return false;
             }
-            
+
             if (userBehavior.interactions < 1) {
                 return false;
             }
-            
+
             return true;
         }
-        
+
         function recordInteraction() {
             userBehavior.interactions++;
         }
-        
+
         tg.expand();
-        
+
         function applyTheme() {
             const isDark = tg.colorScheme === 'dark';
             if (isDark) {
@@ -288,7 +269,7 @@
                 document.documentElement.classList.remove('dark-theme');
             }
         }
-        
+
         tg.onEvent('themeChanged', function() {
             applyTheme();
             if (turnstileWidgetId !== null) {
@@ -297,10 +278,10 @@
                 onTurnstileLoad();
             }
         });
-        
+
         function getUserInfo() {
             const info = { user_id: null, chat_id: null, message_id: null };
-            
+
             try {
                 if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
                     info.user_id = tg.initDataUnsafe.user.id.toString();
@@ -309,26 +290,25 @@
             } catch (error) {
                 console.error('获取用户信息失败:', error);
             }
-            
+
             const urlParams = new URLSearchParams(window.location.search);
-            
             if (!info.user_id) {
                 const urlUserId = urlParams.get('user_id');
                 if (urlUserId) {
                     info.user_id = urlUserId;
                 }
             }
-            
+
             info.chat_id = urlParams.get('chat_id');
             info.message_id = urlParams.get('message_id');
-            
+
             if (!info.user_id) {
                 showError('无法获取用户ID，请从Telegram机器人菜单重新打开签到页面');
             }
-            
+
             return info;
         }
-        
+
         function onTurnstileLoad() {
             const isDark = tg.colorScheme === 'dark';
             turnstileWidgetId = turnstile.render('#turnstile-container', {
@@ -338,12 +318,12 @@
                     const checkinBtn = document.getElementById('checkinBtn');
                     checkinBtn.disabled = false;
                     checkinBtn.textContent = '立即签到';
-                    
+
                     const networkTip = document.querySelector('.network-tip');
                     if (networkTip) {
-                        networkTip.style.display = 'none';
+                        networkTip.style.display = 'none'; 
                     }
-                    
+
                     lastClickTime = Date.now();
                     recordInteraction();
                 },
@@ -352,7 +332,7 @@
                 }
             });
         }
-        
+
         function showSuccess(message) {
             const resultElement = document.getElementById('result');
             resultElement.className = 'result success';
@@ -360,7 +340,7 @@
             resultElement.style.display = 'block';
             document.getElementById('loading').style.display = 'none';
         }
-        
+
         function showError(message) {
             const resultElement = document.getElementById('result');
             resultElement.className = 'result error';
@@ -368,7 +348,7 @@
             resultElement.style.display = 'block';
             document.getElementById('loading').style.display = 'none';
         }
-        
+
         function showWarning(message) {
             const resultElement = document.getElementById('result');
             resultElement.className = 'result warning';
@@ -376,70 +356,68 @@
             resultElement.style.display = 'block';
             document.getElementById('loading').style.display = 'none';
         }
-        
+
         function canClick() {
             const now = Date.now();
-            const randomDelay = Math.floor(Math.random() * 2000) + 1000; // 1000 到 3000 毫秒
-						
+            const randomDelay = Math.floor(Math.random() * 2000) + 1000;
+
             if (now - lastClickTime < randomDelay) {
 						    alert('请稍等片刻再点击签到按钮');
 						    return false;
 						}
-            
+
             if (requestAttempts >= maxAttempts) {
                 alert('签到尝试次数过多，请刷新页面重试');
                 return false;
             }
-            
+
             return true;
         }
-        
+
         document.getElementById('checkinBtn').addEventListener('click', async function() {
             recordInteraction();
-            
-            if (!canClick()) {
+
+            if (!canClick()) { 
                 return;
             }
-            
-            if (!analyzeUserBehavior()) {
+
+            if (!analyzeUserBehavior()) { 
                 alert('请稍等片刻后再试');
                 return;
             }
-            
+
             const userInfo = getUserInfo();
             if (!userInfo.user_id) return;
-            
+
             const token = turnstile.getResponse(turnstileWidgetId);
             if (!token) {
                 alert('请先完成人机验证');
                 return;
             }
-            
+
             this.disabled = true;
             requestAttempts++;
             lastClickTime = Date.now();
             document.getElementById('loading').style.display = 'block';
             document.getElementById('result').style.display = 'none';
-            
+
             try {
                 const timestamp = Math.floor(Date.now() / 1000);
                 const nonce = generateNonce();
-                const signature = await generateSignature(parseInt(userInfo.user_id), timestamp, nonce);
-                
+
                 const requestData = {
                     user_id: parseInt(userInfo.user_id),
                     token: token,
                     timestamp: timestamp,
                     nonce: nonce,
-                    signature: signature,
                     webapp_data: tg.initData || null
                 };
-                
+
                 if (userInfo.chat_id && userInfo.message_id) {
                     requestData.chat_id = parseInt(userInfo.chat_id);
                     requestData.message_id = parseInt(userInfo.message_id);
                 }
-                
+
                 const response = await fetch('/api/checkin/verify', {
                     method: 'POST',
                     headers: {
@@ -448,22 +426,22 @@
                     },
                     body: JSON.stringify(requestData)
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (response.ok) {
                     showSuccess(data.message + '！' + data.reward);
-                    
+
                     this.textContent = '签到成功';
                     this.style.backgroundColor = 'var(--success-text)';
                     this.style.cursor = 'default';
-                    
+
                     if (tg.MainButton) {
                         tg.MainButton.setText('签到成功');
                         tg.MainButton.show();
                         tg.MainButton.disable();
                     }
-                    
+
                     if (data.should_close) {
                         setTimeout(() => {
                             tg.close();
@@ -471,7 +449,7 @@
                     }
                 } else {
                     let errorMessage = data.detail || '签到失败，请稍后重试';
-                    
+
                     switch (response.status) {
                         case 429:
                             errorMessage = '操作过于频繁，请稍后再试';
@@ -488,9 +466,9 @@
                             this.style.backgroundColor = 'var(--warning-text)';
                             break;
                     }
-                    
+
                     showError(errorMessage);
-                    
+
                     if (response.status !== 409) {
                         this.disabled = false;
                         this.textContent = '重新签到';
@@ -503,27 +481,27 @@
                 this.textContent = '重新签到';
             }
         });
-        
+
         document.addEventListener('touchstart', recordInteraction);
         document.addEventListener('touchend', recordInteraction);
         document.addEventListener('mousemove', recordInteraction);
         document.addEventListener('click', recordInteraction);
         document.addEventListener('scroll', recordInteraction);
         document.addEventListener('keydown', recordInteraction);
-        
+
         document.addEventListener('contextmenu', function(e) {
             e.preventDefault();
         });
-        
+
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'F12' || 
+            if (e.key === 'F12' ||
                 (e.ctrlKey && e.shiftKey && e.key === 'I') ||
                 (e.ctrlKey && e.shiftKey && e.key === 'C') ||
                 (e.ctrlKey && e.key === 'u')) {
                 e.preventDefault();
             }
         });
-        
+
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
                 console.log('页面被隐藏');
@@ -534,24 +512,24 @@
                 }
             }
         });
-        
+
         window.onload = function() {
             performSecurityChecks();
-            
+
             applyTheme();
             getUserInfo();
-            
+
             if (typeof turnstile !== 'undefined') {
                 onTurnstileLoad();
             } else {
                 window.onloadTurnstileCallback = onTurnstileLoad;
             }
-            
+
             setTimeout(() => {
                 console.log('页面加载完成');
             }, 1000);
         };
-        
+
         window.addEventListener('beforeunload', function() {
             userBehavior.interactions = 0;
         });
