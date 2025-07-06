@@ -36,9 +36,12 @@ TURNSTILE_SECRET_KEY = config_api.cloudflare_turnstile.secret_key
 
 SIGNING_SECRET = config_api.singing_secret
 
-MAX_REQUEST_AGE = 30
-RATE_LIMIT_WINDOW = 30
-MAX_REQUESTS_PER_HOUR = 3
+MAX_REQUEST_AGE = 5
+RATE_LIMIT_WINDOW = 3600
+MAX_REQUESTS_PER_HOUR = 2
+MAX_PAGE_LOAD_INTERVAL = 15
+MIN_PAGE_LOAD_INTERVAL = 3
+MIN_USER_INRTEACTION = 3
 
 REDIS_HOST = config_api.redis.host
 REDIS_PORT = config_api.redis.port
@@ -58,10 +61,11 @@ try:
     redis_client.ping()
     LOGGER.info("✅ Redis 连接成功！")
 except (RedisConnectionError, redis.exceptions.ResponseError) as e:
-    LOGGER.warning(f"❌ Redis 连接或认证失败: {e}. 将使用内存存储 Nonce。")
+    LOGGER.warning(f"❌ Redis 连接或认证失败: {e}. 将使用内存存储 Nonce")
     redis_client = None
 
-request_records: Dict[int, list] = {}
+user_request_records: Dict[int, list] = {}
+ip_request_records: Dict[str, list] = {}
 memory_used_nonces: set = set()
 
 # ==================== 请求模型 ====================
@@ -73,6 +77,9 @@ class CheckinVerifyRequest(BaseModel):
     timestamp: int
     nonce: str
     webapp_data: Optional[str] = None
+    interactions: Optional[int] = None
+    session_duration: Optional[int] = None
+    page_load_time: Optional[int] = None
 
 # ==================== 工具函数 ====================
 def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
@@ -105,14 +112,62 @@ def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
         LOGGER.error(f"❌ Telegram WebApp数据验证失败: {e}")
         raise HTTPException(status_code=401, detail="数据验证失败")
 
-def check_rate_limit(user_id: int) -> bool:
-    now = time.time()
-    if user_id not in request_records:
-        request_records[user_id] = []
-    request_records[user_id] = [t for t in request_records[user_id] if now - t < RATE_LIMIT_WINDOW]
-    if len(request_records[user_id]) >= MAX_REQUESTS_PER_HOUR:
+def check_and_record_request(user_id: int, client_ip: str) -> bool:
+    global redis_client
+
+    now = int(time.time())
+
+    try:
+        if redis_client:
+            user_key = f"rate_limit:user:{user_id}"
+            ip_key = f"rate_limit:ip:{client_ip}"
+
+            redis_client.zremrangebyscore(user_key, 0, now - RATE_LIMIT_WINDOW)
+            redis_client.zremrangebyscore(ip_key, 0, now - RATE_LIMIT_WINDOW)
+
+            user_count = redis_client.zcard(user_key)
+            ip_count = redis_client.zcard(ip_key)
+            rate_limit_window = RATE_LIMIT_WINDOW / 3600
+
+            if user_count >= MAX_REQUESTS_PER_HOUR:
+                LOGGER.info(f"❌ 用户限频 - 用户: {user_id}, {rate_limit_window} 小时记录数: {user_count}")
+                return False
+            if ip_count >= MAX_REQUESTS_PER_HOUR:
+                LOGGER.info(f"❌ IP限频 - IP: {client_ip}, {rate_limit_window} 小时记录数: {ip_count}")
+                return False
+
+            redis_client.zadd(user_key, {str(now): now})
+            redis_client.zadd(ip_key, {str(now): now})
+            redis_client.expire(user_key, RATE_LIMIT_WINDOW)
+            redis_client.expire(ip_key, RATE_LIMIT_WINDOW)
+            return True
+
+    except (RedisConnectionError, redis.exceptions.ResponseError) as e:
+        LOGGER.warning(f"❌ Redis 频率控制失败: {e}. 回退到内存限频")
+        redis_client = None
+
+    if user_id not in user_request_records:
+        user_request_records[user_id] = []
+    if client_ip not in ip_request_records:
+        ip_request_records[client_ip] = []
+
+    user_request_records[user_id] = [t for t in user_request_records[user_id] if now - t < RATE_LIMIT_WINDOW]
+    ip_request_records[client_ip] = [t for t in ip_request_records[client_ip] if now - t < RATE_LIMIT_WINDOW]
+
+    user_count = len(user_request_records[user_id])
+    ip_count = len(ip_request_records[client_ip])
+    rate_limit_window = RATE_LIMIT_WINDOW / 3600
+
+    if user_count >= MAX_REQUESTS_PER_HOUR:
+        LOGGER.info(f"❌ 用户限频 - 用户: {user_id}, {rate_limit_window} 小时记录数: {user_count}")
         return False
-    request_records[user_id].append(now)
+    if ip_count >= MAX_REQUESTS_PER_HOUR:
+        LOGGER.info(f"❌ IP限频 - IP: {client_ip}, {rate_limit_window} 小时记录数: {ip_count}")
+        return False
+
+    user_request_records[user_id].append(now)
+    ip_request_records[client_ip].append(now)
+
     return True
 
 def verify_request_freshness(timestamp: int, nonce: str) -> bool:
@@ -132,7 +187,7 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
             redis_client.expire(nonce_key, MAX_REQUEST_AGE)
             return True
         except (RedisConnectionError, redis.exceptions.ResponseError) as e:
-            LOGGER.warning(f"❌ Redis 操作失败: {e}. 回退到内存 Nonce 检查。")
+            LOGGER.warning(f"❌ Redis 操作失败: {e}. 回退到内存 Nonce 检查")
             redis_client = None
             if nonce_key in memory_used_nonces:
                 return False
@@ -167,6 +222,38 @@ def detect_suspicious_behavior(request: Request, user_agent: str) -> bool:
         return True
     return False
 
+def analyze_user_behavior_backend(interactions: Optional[int], session_duration: Optional[int], user_id: int, client_ip: str) -> bool:
+    if interactions is None or interactions < MIN_USER_INRTEACTION:
+        LOGGER.info(f"❌ 可疑行为：前端交互次数为None或过少 - 用户: {user_id}, IP: {client_ip}, 交互次数: {interactions}")
+        return True
+    
+    session_duration_s = session_duration / 1000
+    if session_duration_s is None or session_duration_s < MIN_PAGE_LOAD_INTERVAL:
+        LOGGER.info(f"❌ 可疑行为：前端会话时长为None或过短 - 用户: {user_id}, IP: {client_ip}, 会话时长: {session_duration}ms")
+        return True
+    return False
+
+def analyze_page_load_interval(page_load_time: Optional[int], user_id: int, client_ip: str) -> bool:
+    if page_load_time is None:
+        LOGGER.info(f"❌ 可疑行为：缺少页面加载时间 - 用户: {user_id}, IP: {client_ip}")
+        return True
+
+    current_time_ms = int(time.time() * 1000)
+    page_load_time_ms = page_load_time
+
+    interval_ms = current_time_ms - page_load_time_ms
+    interval_s = interval_ms / 1000
+
+    if interval_s < MIN_PAGE_LOAD_INTERVAL:
+        LOGGER.info(f"❌ 可疑行为：页面加载到请求发送间隔过短 - 用户: {user_id}, IP: {client_ip}, 间隔: {interval_s:.3f}s")
+        return True
+
+    if interval_s > MAX_PAGE_LOAD_INTERVAL:
+        LOGGER.info(f"❌ 可疑行为：页面加载到请求发送间隔过长 - 用户: {user_id}, IP: {client_ip}, 间隔: {interval_s:.3f}s")
+        return True
+
+    return False
+
 # ==================== 路由处理 ====================
 @route.get("/web", response_class=HTMLResponse)
 async def checkin_page(request: Request):
@@ -188,17 +275,22 @@ async def verify_checkin(
     if not _open.checkin:
         raise HTTPException(status_code=403, detail="签到功能未开启")
 
+    if not check_and_record_request(request_data.user_id, client_ip):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+
     if detect_suspicious_behavior(request, user_agent):
         LOGGER.info(f"❌ 检测到可疑行为 - 用户: {request_data.user_id}, IP: {client_ip}")
         raise HTTPException(status_code=403, detail="请求被拒绝")
 
+    if analyze_user_behavior_backend(request_data.interactions, request_data.session_duration, request_data.user_id, client_ip):
+        raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
+
+    if analyze_page_load_interval(request_data.page_load_time, request_data.user_id, client_ip):
+        raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
+
     if not verify_request_freshness(request_data.timestamp, request_data.nonce):
         LOGGER.info(f"❌ 请求无效或已过期 - 用户: {request_data.user_id}, IP: {client_ip}, 时间戳: {request_data.timestamp}, 当前时间: {datetime.now().isoformat()}, Nonce: {request_data.nonce}")
         raise HTTPException(status_code=400, detail="请求无效或已过期")
-
-    if not check_rate_limit(request_data.user_id):
-        LOGGER.info(f"❌ 频率限制触发 - 用户: {request_data.user_id}")
-        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
 
     if request_data.webapp_data:
         try:
@@ -212,7 +304,7 @@ async def verify_checkin(
             LOGGER.error(f"❌ WebApp数据验证错误: {e}")
             raise HTTPException(status_code=401, detail="身份验证失败")
 
-    async with aiohttp.ClientSession( ) as session:
+    async with aiohttp.ClientSession() as session:
         try:
             async with session.post(
                 "https://challenges.cloudflare.com/turnstile/v0/siteverify",
@@ -221,7 +313,7 @@ async def verify_checkin(
                     "response": request_data.token,
                     "remoteip": client_ip
                 },
-                timeout=aiohttp.ClientTimeout(total=10 )
+                timeout=aiohttp.ClientTimeout(total=10)
             ) as response:
                 result = await response.json()
                 if not result.get("success", False):
@@ -229,7 +321,7 @@ async def verify_checkin(
                     LOGGER.info(f"❌ Turnstile验证失败 - 用户: {request_data.user_id}, 错误: {error_codes}, IP: {client_ip}")
                     raise HTTPException(status_code=400, detail="人机验证失败，请重试")
         except aiohttp.ClientError as e:
-            LOGGER.error(f"❌ Turnstile验证网络错误: {e}" )
+            LOGGER.error(f"❌ Turnstile验证网络错误: {e}")
             raise HTTPException(status_code=503, detail="验证服务暂时不可用")
 
     e = sql_get_emby(request_data.user_id)

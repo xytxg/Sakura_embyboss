@@ -226,7 +226,8 @@
         let tg = window.Telegram.WebApp;
         let userId = null;
         let turnstileWidgetId = null;
-        let lastClickTime = 0;
+        let pageLoadTime = Date.now();
+
         let requestAttempts = 0;
         const maxAttempts = 3;
 
@@ -324,7 +325,6 @@
                         networkTip.style.display = 'none'; 
                     }
 
-                    lastClickTime = Date.now();
                     recordInteraction();
                 },
                 'error-callback': function() {
@@ -358,13 +358,6 @@
         }
 
         function canClick() {
-            const now = Date.now();
-            const randomDelay = Math.floor(Math.random() * 2000) + 1000;
-
-            if (now - lastClickTime < randomDelay) {
-						    alert('请稍等片刻再点击签到按钮');
-						    return false;
-						}
 
             if (requestAttempts >= maxAttempts) {
                 alert('签到尝试次数过多，请刷新页面重试');
@@ -397,8 +390,7 @@
 
             this.disabled = true;
             requestAttempts++;
-            lastClickTime = Date.now();
-            document.getElementById('loading').style.display = 'block';
+
             document.getElementById('result').style.display = 'none';
 
             try {
@@ -410,7 +402,10 @@
                     token: token,
                     timestamp: timestamp,
                     nonce: nonce,
-                    webapp_data: tg.initData || null
+                    webapp_data: tg.initData || null,
+                    interactions: userBehavior.interactions,
+                    session_duration: Date.now() - userBehavior.startTime,
+                    page_load_time: pageLoadTime
                 };
 
                 if (userInfo.chat_id && userInfo.message_id) {
@@ -458,7 +453,7 @@
                             errorMessage = '身份验证失败，请重新打开页面';
                             break;
                         case 403:
-                            errorMessage = '访问被拒绝，请通过官方渠道访问';
+                            errorMessage = '检测到异常，请稍后再试';
                             break;
                         case 409:
                             errorMessage = '您今天已经签到过了，再签到剁掉你的小鸡鸡🐤';
@@ -469,14 +464,23 @@
 
                     showError(errorMessage);
 
-                    if (response.status !== 409) {
+                    if (response.status === 429 || response.status === 400 || response.status === 401 || response.status === 403) {
+                        this.disabled = true;
+                        this.textContent = '请重新打开页面';
+                        this.style.cursor = 'default';
+                        if (tg.MainButton) {
+                            tg.MainButton.setText('请重新打开页面');
+                            tg.MainButton.show();
+                            tg.MainButton.disable();
+                        }
+                    } else if (response.status !== 409) {
                         this.disabled = false;
                         this.textContent = '重新签到';
                     }
                 }
             } catch (error) {
                 console.error('签到请求失败:', error);
-                showError('网络错误，请检查网络连接后重试');
+                showError('连接失败或服务器异常，请稍后重试');
                 this.disabled = false;
                 this.textContent = '重新签到';
             }
@@ -518,6 +522,8 @@
 
             applyTheme();
             getUserInfo();
+
+            pageLoadTime = Date.now();
 
             if (typeof turnstile !== 'undefined') {
                 onTurnstileLoad();
