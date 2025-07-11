@@ -71,6 +71,7 @@ async def create_user(_, call, us, stats):
                 ex = '__若21天无观看将封禁__'
             else:
                 ex = '__无需保号，放心食用__'
+            emby_line_variable = emby_line.format(name=emby_name, pwd=pwd)
             await editMessage(send,
                               f'**▎创建用户成功🎉**\n\n'
                               f'· 用户名称 | `{emby_name}`\n'
@@ -78,7 +79,7 @@ async def create_user(_, call, us, stats):
                               f'· 安全密码 | `{emby_pwd2}`（仅发送一次）\n'
                               f'· 到期时间 | `{ex}`\n'
                               f'· 当前线路：\n'
-                              f'{emby_line}\n\n'
+                              f'{emby_line_variable}\n\n'
                               f'**·【服务器】 - 查看线路和密码**')
             LOGGER.info(f"【创建账户】[开注状态]：{call.from_user.id} - 建立了 {emby_name} ") if stats else LOGGER.info(
                 f"【创建账户】：{call.from_user.id} - 建立了 {emby_name} ")

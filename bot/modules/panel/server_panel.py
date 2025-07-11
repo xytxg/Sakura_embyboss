@@ -33,13 +33,18 @@ async def server(_, call):
         server_info = ''.join([item['server'] for item in sever if item['id'] == j])
 
     pwd = '空' if not data.pwd else data.pwd
+    real_pwd = data.pwd or ""
+    emby_line_variable = emby_line.format(name=data.name, pwd=real_pwd)
+    emby_whitelist_line_variable = ''
+    if emby_whitelist_line:
+        emby_whitelist_line_variable = emby_whitelist_line.format(name=data.name, pwd=real_pwd)
     line = ''
     if data.lv == 'b':
-        line = f'{emby_line}'
+        line = f'{emby_line_variable}'
     elif data.lv == 'a':
-        line = f'{emby_line}'
-        if emby_whitelist_line:
-            line += f'\n{emby_whitelist_line}'
+        line = f'{emby_line_variable}'
+        if emby_whitelist_line_variable:
+            line += f'\n{emby_whitelist_line_variable}'
     else:
         line = ' - **无权查看**'
     try:
