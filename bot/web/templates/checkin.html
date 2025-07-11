@@ -229,7 +229,7 @@
         let pageLoadTime = Date.now();
 
         let requestAttempts = 0;
-        const maxAttempts = 3;
+        const maxAttempts = 1;
 
         function generateNonce() {
             return Math.random().toString(36).substring(2, 15) +
@@ -481,8 +481,8 @@
             } catch (error) {
                 console.error('签到请求失败:', error);
                 showError('连接失败或服务器异常，请稍后重试');
-                this.disabled = false;
-                this.textContent = '重新签到';
+                this.disabled = true;
+                this.textContent = '请重新打开页面';
             }
         });
 

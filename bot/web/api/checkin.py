@@ -38,8 +38,8 @@ SIGNING_SECRET = config_api.singing_secret
 
 MAX_REQUEST_AGE = 5
 RATE_LIMIT_WINDOW = 3600
-MAX_REQUESTS_PER_HOUR = 2
-MAX_PAGE_LOAD_INTERVAL = 15
+MAX_REQUESTS_PER_HOUR = 3
+MAX_PAGE_LOAD_INTERVAL = 17
 MIN_PAGE_LOAD_INTERVAL = 3
 MIN_USER_INRTEACTION = 3
 
@@ -87,11 +87,7 @@ def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="缺少Telegram WebApp数据")
 
     try:
-        parsed_data = {}
-        for item in init_data.split('&'):
-            key, value = item.split('=', 1)
-            parsed_data[key] = urllib.parse.unquote(value)
-
+        parsed_data = {k: urllib.parse.unquote(v) for k, v in (item.split('=', 1) for item in init_data.split('&'))}
         received_hash = parsed_data.pop('hash', '')
         if not received_hash:
             raise HTTPException(status_code=401, detail="缺少数据完整性验证")
@@ -112,63 +108,53 @@ def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
         LOGGER.error(f"❌ Telegram WebApp数据验证失败: {e}")
         raise HTTPException(status_code=401, detail="数据验证失败")
 
-def check_and_record_request(user_id: int, client_ip: str) -> bool:
+def check_and_record_request(user_id: int, client_ip: str) -> Optional[str]:
     global redis_client
-
     now = int(time.time())
-
+    
     try:
         if redis_client:
             user_key = f"rate_limit:user:{user_id}"
             ip_key = f"rate_limit:ip:{client_ip}"
-
-            redis_client.zremrangebyscore(user_key, 0, now - RATE_LIMIT_WINDOW)
-            redis_client.zremrangebyscore(ip_key, 0, now - RATE_LIMIT_WINDOW)
-
-            user_count = redis_client.zcard(user_key)
-            ip_count = redis_client.zcard(ip_key)
-            rate_limit_window = RATE_LIMIT_WINDOW / 3600
-
+            
+            pipe = redis_client.pipeline()
+            pipe.zremrangebyscore(user_key, 0, now - RATE_LIMIT_WINDOW)
+            pipe.zremrangebyscore(ip_key, 0, now - RATE_LIMIT_WINDOW)
+            pipe.zcard(user_key)
+            pipe.zcard(ip_key)
+            results = pipe.execute()
+            
+            user_count, ip_count = results[2], results[3]
+            
             if user_count >= MAX_REQUESTS_PER_HOUR:
-                LOGGER.info(f"❌ 用户限频 - 用户: {user_id}, {rate_limit_window} 小时记录数: {user_count}")
-                return False
+                return "user_rate_limited"
             if ip_count >= MAX_REQUESTS_PER_HOUR:
-                LOGGER.info(f"❌ IP限频 - IP: {client_ip}, {rate_limit_window} 小时记录数: {ip_count}")
-                return False
-
-            redis_client.zadd(user_key, {str(now): now})
-            redis_client.zadd(ip_key, {str(now): now})
-            redis_client.expire(user_key, RATE_LIMIT_WINDOW)
-            redis_client.expire(ip_key, RATE_LIMIT_WINDOW)
-            return True
-
+                return "ip_rate_limited"
+            
+            pipe = redis_client.pipeline()
+            pipe.zadd(user_key, {str(now): now})
+            pipe.zadd(ip_key, {str(now): now})
+            pipe.expire(user_key, RATE_LIMIT_WINDOW)
+            pipe.expire(ip_key, RATE_LIMIT_WINDOW)
+            pipe.execute()
+            return None
     except (RedisConnectionError, redis.exceptions.ResponseError) as e:
-        LOGGER.warning(f"❌ Redis 频率控制失败: {e}. 回退到内存限频")
+        LOGGER.warning(f"🟡 Redis 频率控制失败: {e}. 回退到内存限频。")
         redis_client = None
 
-    if user_id not in user_request_records:
-        user_request_records[user_id] = []
-    if client_ip not in ip_request_records:
-        ip_request_records[client_ip] = []
-
+    user_request_records.setdefault(user_id, [])
+    ip_request_records.setdefault(client_ip, [])
     user_request_records[user_id] = [t for t in user_request_records[user_id] if now - t < RATE_LIMIT_WINDOW]
     ip_request_records[client_ip] = [t for t in ip_request_records[client_ip] if now - t < RATE_LIMIT_WINDOW]
-
-    user_count = len(user_request_records[user_id])
-    ip_count = len(ip_request_records[client_ip])
-    rate_limit_window = RATE_LIMIT_WINDOW / 3600
-
-    if user_count >= MAX_REQUESTS_PER_HOUR:
-        LOGGER.info(f"❌ 用户限频 - 用户: {user_id}, {rate_limit_window} 小时记录数: {user_count}")
-        return False
-    if ip_count >= MAX_REQUESTS_PER_HOUR:
-        LOGGER.info(f"❌ IP限频 - IP: {client_ip}, {rate_limit_window} 小时记录数: {ip_count}")
-        return False
+    
+    if len(user_request_records[user_id]) >= MAX_REQUESTS_PER_HOUR:
+        return "user_rate_limited"
+    if len(ip_request_records[client_ip]) >= MAX_REQUESTS_PER_HOUR:
+        return "ip_rate_limited"
 
     user_request_records[user_id].append(now)
     ip_request_records[client_ip].append(now)
-
-    return True
+    return None
 
 def verify_request_freshness(timestamp: int, nonce: str) -> bool:
     global redis_client
@@ -178,81 +164,51 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
     if abs(current_time - timestamp) > MAX_REQUEST_AGE:
         return False
 
-    nonce_key = f"nonce:{timestamp}:{nonce}"
-
     if redis_client:
         try:
-            if not redis_client.setnx(nonce_key, 1):
+            redis_nonce_key = f"nonce:{nonce}"
+            if not redis_client.set(redis_nonce_key, 1, ex=MAX_REQUEST_AGE, nx=True):
                 return False
-            redis_client.expire(nonce_key, MAX_REQUEST_AGE)
             return True
         except (RedisConnectionError, redis.exceptions.ResponseError) as e:
-            LOGGER.warning(f"❌ Redis 操作失败: {e}. 回退到内存 Nonce 检查")
+            LOGGER.warning(f"🟡 Redis Nonce 操作失败: {e}. 回退到内存检查。")
             redis_client = None
-            if nonce_key in memory_used_nonces:
-                return False
-            memory_used_nonces.add(nonce_key)
-            expired = {n for n in memory_used_nonces if current_time - int(n.split(':')[1]) > MAX_REQUEST_AGE}
-            memory_used_nonces -= expired
-            return True
-    else:
-        if nonce_key in memory_used_nonces:
-            return False
-        memory_used_nonces.add(nonce_key)
-        expired = {n for n in memory_used_nonces if current_time - int(n.split(':')[1]) > MAX_REQUEST_AGE}
-        memory_used_nonces -= expired
-        return True
 
-def detect_suspicious_behavior(request: Request, user_agent: str) -> bool:
-    if not user_agent or len(user_agent) < 10:
-        LOGGER.info(f"❌ 可疑请求：User-Agent过短或缺失: {user_agent}")
-        return True
-    for pattern in ['bot', 'crawler', 'spider', 'scraper', 'wget', 'curl', 'python-requests', 'aiohttp', 'okhttp']:
-        if pattern in user_agent.lower( ):
-            LOGGER.info(f"❌ 可疑请求：检测到机器人User-Agent: {user_agent}")
-            return True
-    required_headers = ["host", "user-agent", "accept", "accept-language"]
-    for header in required_headers:
-        if header not in request.headers:
-            LOGGER.info(f"❌ 可疑请求：缺少必要请求头: {header}")
-            return True
-    referer = request.headers.get("referer")
-    if not referer or f"//{request.url.netloc}/api/checkin/web" not in referer:
-        LOGGER.info(f"❌ 可疑请求：Referer异常或缺失: {referer}" )
-        return True
-    return False
+    mem_nonce_key = f"nonce:{timestamp}:{nonce}"
 
-def analyze_user_behavior_backend(interactions: Optional[int], session_duration: Optional[int], user_id: int, client_ip: str) -> bool:
-    if interactions is None or interactions < MIN_USER_INRTEACTION:
-        LOGGER.info(f"❌ 可疑行为：前端交互次数为None或过少 - 用户: {user_id}, IP: {client_ip}, 交互次数: {interactions}")
-        return True
+    if mem_nonce_key in memory_used_nonces:
+        return False
     
-    session_duration_s = session_duration / 1000
-    if session_duration_s is None or session_duration_s < MIN_PAGE_LOAD_INTERVAL:
-        LOGGER.info(f"❌ 可疑行为：前端会话时长为None或过短 - 用户: {user_id}, IP: {client_ip}, 会话时长: {session_duration}ms")
-        return True
-    return False
+    memory_used_nonces.add(mem_nonce_key)
 
-def analyze_page_load_interval(page_load_time: Optional[int], user_id: int, client_ip: str) -> bool:
-    if page_load_time is None:
-        LOGGER.info(f"❌ 可疑行为：缺少页面加载时间 - 用户: {user_id}, IP: {client_ip}")
-        return True
+    if random.random() < 0.01:
+        expired_nonces = {
+            n for n in memory_used_nonces 
+            if current_time - int(n.split(':')[1]) > MAX_REQUEST_AGE
+        }
+        if expired_nonces:
+            memory_used_nonces.difference_update(expired_nonces)
+            LOGGER.debug(f"内存Nonce清理完成，移除了 {len(expired_nonces)} 个过期Nonce。")
 
-    current_time_ms = int(time.time() * 1000)
-    page_load_time_ms = page_load_time
+    return True
 
-    interval_ms = current_time_ms - page_load_time_ms
-    interval_s = interval_ms / 1000
+def run_all_security_checks(request: Request, data: CheckinVerifyRequest, user_agent: str) -> Optional[str]:
+    if not user_agent or len(user_agent) < 10: return f"UA过短或缺失"
+    for pattern in ['bot', 'crawler', 'spider', 'scraper', 'wget', 'curl', 'python-requests', 'aiohttp', 'okhttp']:
+        if pattern in user_agent.lower( ): return f"检测到 {pattern} UA"
+    for header in ["host", "user-agent", "accept", "accept-language"]:
+        if header not in request.headers: return f"缺少 {header} 请求头"
+    
+    if data.interactions is None or data.interactions < MIN_USER_INRTEACTION: return f"前端交互仅 {data.interactions} 次"
+    if data.session_duration is None or (data.session_duration / 1000) < MIN_PAGE_LOAD_INTERVAL: return f"前端会话时长仅 {data.session_duration}ms"
 
-    if interval_s < MIN_PAGE_LOAD_INTERVAL:
-        LOGGER.info(f"❌ 可疑行为：页面加载到请求发送间隔过短 - 用户: {user_id}, IP: {client_ip}, 间隔: {interval_s:.3f}s")
-        return True
+    if data.page_load_time is None: return "缺少页面加载时间"
+    interval_s = (int(time.time() * 1000) - data.page_load_time) / 1000
+    if not (MIN_PAGE_LOAD_INTERVAL <= interval_s <= MAX_PAGE_LOAD_INTERVAL): return f"请求间隔为 {interval_s:.3f}s"
 
-    if interval_s > MAX_PAGE_LOAD_INTERVAL:
-        LOGGER.info(f"❌ 可疑行为：页面加载到请求发送间隔过长 - 用户: {user_id}, IP: {client_ip}, 间隔: {interval_s:.3f}s")
-        return True
+    if not verify_request_freshness(data.timestamp, data.nonce): return f"请求无效或已过期 (Nonce)"
 
-    return False
+    return None
 
 # ==================== 路由处理 ====================
 @route.get("/web", response_class=HTMLResponse)
@@ -270,99 +226,96 @@ async def verify_checkin(
     x_forwarded_for: str = Header(None)
 ):
     client_ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.client.host
-    LOGGER.info(f"📅 签到请求 - 用户: {request_data.user_id}, IP: {client_ip}, UA: {user_agent}")
-
-    if not _open.checkin:
-        raise HTTPException(status_code=403, detail="签到功能未开启")
-
-    if not check_and_record_request(request_data.user_id, client_ip):
-        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
-
-    if detect_suspicious_behavior(request, user_agent):
-        LOGGER.info(f"❌ 检测到可疑行为 - 用户: {request_data.user_id}, IP: {client_ip}")
-        raise HTTPException(status_code=403, detail="请求被拒绝")
-
-    if analyze_user_behavior_backend(request_data.interactions, request_data.session_duration, request_data.user_id, client_ip):
-        raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
-
-    if analyze_page_load_interval(request_data.page_load_time, request_data.user_id, client_ip):
-        raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
-
-    if not verify_request_freshness(request_data.timestamp, request_data.nonce):
-        LOGGER.info(f"❌ 请求无效或已过期 - 用户: {request_data.user_id}, IP: {client_ip}, 时间戳: {request_data.timestamp}, 当前时间: {datetime.now().isoformat()}, Nonce: {request_data.nonce}")
-        raise HTTPException(status_code=400, detail="请求无效或已过期")
-
-    if request_data.webapp_data:
-        try:
-            webapp_info = verify_telegram_webapp_data(request_data.webapp_data)
-            webapp_user_id = json.loads(webapp_info.get('user', '{}')).get('id')
-            if webapp_user_id != request_data.user_id:
-                raise HTTPException(status_code=401, detail="用户身份验证失败")
-        except HTTPException:
-            raise
-        except Exception as e:
-            LOGGER.error(f"❌ WebApp数据验证错误: {e}")
-            raise HTTPException(status_code=401, detail="身份验证失败")
-
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={
-                    "secret": TURNSTILE_SECRET_KEY,
-                    "response": request_data.token,
-                    "remoteip": client_ip
-                },
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                result = await response.json()
-                if not result.get("success", False):
-                    error_codes = result.get("error-codes", [])
-                    LOGGER.info(f"❌ Turnstile验证失败 - 用户: {request_data.user_id}, 错误: {error_codes}, IP: {client_ip}")
-                    raise HTTPException(status_code=400, detail="人机验证失败，请重试")
-        except aiohttp.ClientError as e:
-            LOGGER.error(f"❌ Turnstile验证网络错误: {e}")
-            raise HTTPException(status_code=503, detail="验证服务暂时不可用")
-
-    e = sql_get_emby(request_data.user_id)
-    if not e:
-        raise HTTPException(status_code=404, detail="未查询到用户数据")
-
-    now = datetime.now(timezone(timedelta(hours=8)))
-    today = now.strftime("%Y-%m-%d")
-    if e.ch and e.ch.strftime("%Y-%m-%d") >= today:
-        raise HTTPException(status_code=409, detail="您今天已经签到过了，再签到剁掉你的小鸡鸡🐤")
-
-    reward = random.randint(_open.checkin_reward[0], _open.checkin_reward[1])
-    new_balance = e.iv + reward
+    log_base_info = f"用户: {request_data.user_id}, IP: {client_ip}, UA: {user_agent}"
 
     try:
-        sql_update_emby(Emby.tg == request_data.user_id, iv=new_balance, ch=now)
-    except Exception as e:
-        LOGGER.error(f"数据库更新失败: {e}")
-        raise HTTPException(status_code=500, detail="签到处理失败，请重试")
+        if not _open.checkin:
+            LOGGER.warning(f"⚠️ 签到失败 (功能未开启) - {log_base_info}")
+            raise HTTPException(status_code=403, detail="签到功能未开启")
 
-    LOGGER.info(f"✔️ 签到成功 - 用户: {request_data.user_id}, 奖励: {reward} {sakura_b}, IP: {client_ip}")
+        rate_limit_reason = check_and_record_request(request_data.user_id, client_ip)
+        if rate_limit_reason:
+            detail_message = "请求过于频繁，请稍后再试"
+            if rate_limit_reason == "user_rate_limited":
+                detail_message = "您的签到请求过于频繁，请稍后再试"
+            elif rate_limit_reason == "ip_rate_limited":
+                detail_message = "当前IP地址请求过于频繁，请稍后再试"
+            LOGGER.warning(f"⚠️ 签到失败 (请求频繁: {rate_limit_reason}) - {log_base_info})")
+            raise HTTPException(status_code=429, detail=detail_message)
 
-    checkin_text = f'🎉 **签到成功** | {reward} {sakura_b}\n💴 **当前持有** | {new_balance} {sakura_b}\n⏳ **签到日期** | {now.strftime("%Y-%m-%d")}'
+        suspicion_reason = run_all_security_checks(request, request_data, user_agent)
+        if suspicion_reason:
+            LOGGER.warning(f"⚠️ 签到失败 (可疑行为: {suspicion_reason}) - {log_base_info}")
+            raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
 
-    try:
-        from bot import bot
-        if request_data.chat_id and request_data.message_id:
+        if request_data.webapp_data:
             try:
-                await bot.delete_messages(
-                    chat_id=request_data.chat_id,
-                    message_ids=request_data.message_id
-                )
-            except Exception as e:
-                LOGGER.error(f"❌ 删除面板消息失败: {e}")
-        await bot.send_message(chat_id=request_data.user_id, text=checkin_text)
-    except Exception as e:
-        LOGGER.error(f"❌ 发送消息失败: {e}")
+                webapp_info = verify_telegram_webapp_data(request_data.webapp_data)
+                webapp_user_id = json.loads(webapp_info.get('user', '{}')).get('id')
+                if webapp_user_id != request_data.user_id:
+                    LOGGER.warning(f"⚠️ 签到失败 (身份验证失败) - {log_base_info}")
+                    raise HTTPException(status_code=401, detail="用户身份验证失败")
+            except HTTPException as e:
+                if e.status_code != 401: LOGGER.error(f"❌ WebApp数据验证错误: {e.detail}")
+                raise
 
-    return JSONResponse({
-        "success": True,
-        "message": "签到成功",
-        "reward": f"获得 {reward} {sakura_b}，当前持有 {new_balance} {sakura_b}",
-        "should_close": True
-    })
+        async with aiohttp.ClientSession( ) as session:
+            try:
+                async with session.post(
+                    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                    data={"secret": TURNSTILE_SECRET_KEY, "response": request_data.token, "remoteip": client_ip},
+                    timeout=aiohttp.ClientTimeout(total=10 )
+                ) as response:
+                    result = await response.json()
+                    if not result.get("success", False):
+                        error_codes = result.get("error-codes", [])
+                        LOGGER.warning(f"⚠️ 签到失败 (人机验证: {error_codes}) - {log_base_info}")
+                        raise HTTPException(status_code=400, detail="人机验证失败，请重试")
+            except aiohttp.ClientError as e:
+                LOGGER.error(f"❌ Turnstile验证网络错误: {e}" )
+                raise HTTPException(status_code=503, detail="验证服务暂时不可用")
+
+        e = sql_get_emby(request_data.user_id)
+        if not e:
+            LOGGER.warning(f"⚠️ 签到失败 (用户不存在) - {log_base_info}")
+            raise HTTPException(status_code=404, detail="未查询到用户数据")
+
+        now = datetime.now(timezone(timedelta(hours=8)))
+        today = now.strftime("%Y-%m-%d")
+        if e.ch and e.ch.strftime("%Y-%m-%d") >= today:
+            LOGGER.info(f"ℹ️ 签到中止 (今日已签) - {log_base_info}")
+            raise HTTPException(status_code=409, detail="您今天已经签到过了，再签到剁掉你的小鸡鸡🐤")
+
+        reward = random.randint(_open.checkin_reward[0], _open.checkin_reward[1])
+        new_balance = e.iv + reward
+
+        try:
+            sql_update_emby(Emby.tg == request_data.user_id, iv=new_balance, ch=now)
+        except Exception as db_err:
+            LOGGER.error(f"❌ 签到失败 (数据库更新错误: {db_err}) - {log_base_info}")
+            raise HTTPException(status_code=500, detail="签到处理失败，请重试")
+
+        LOGGER.info(f"✔️ 签到成功 (奖励: {reward} {sakura_b}) - {log_base_info}")
+
+        checkin_text = f'🎉 **签到成功** | {reward} {sakura_b}\n💴 **当前持有** | {new_balance} {sakura_b}\n⏳ **签到日期** | {now.strftime("%Y-%m-%d")}'
+
+        try:
+            from bot import bot
+            if request_data.chat_id and request_data.message_id:
+                await bot.delete_messages(chat_id=request_data.chat_id, message_ids=request_data.message_id)
+            await bot.send_message(chat_id=request_data.user_id, text=checkin_text)
+        except Exception as tg_err:
+            LOGGER.error(f"❌ 发送TG消息失败: {tg_err}")
+
+        return JSONResponse({
+            "success": True,
+            "message": "签到成功",
+            "reward": f"获得 {reward} {sakura_b}，当前持有 {new_balance} {sakura_b}",
+            "should_close": True
+        })
+
+    except HTTPException:
+        raise
+    except Exception as final_err:
+        LOGGER.error(f"💥 签到失败 (未知错误: {final_err}) - {log_base_info}")
+        raise HTTPException(status_code=500, detail="服务器内部错误")
