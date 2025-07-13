@@ -447,7 +447,7 @@
 
                     switch (response.status) {
                         case 429:
-                            errorMessage = '操作过于频繁，请稍后再试';
+                            errorMessage = data.detail || '操作过于频繁，请稍后再试';
                             break;
                         case 401:
                             errorMessage = '身份验证失败，请重新打开页面';

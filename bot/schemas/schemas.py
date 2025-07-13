@@ -119,6 +119,11 @@ class CloudflareTurnstile(BaseModel):
     site_key: Optional[str] = ""
     secret_key: Optional[str] = ""
 
+class LogToTG(BaseModel):
+    bot_token: Optional[str] = ""
+    chat_id: Optional[str] = ""
+    thread_id: Optional[str] = ""
+
 class RedisConfig(BaseModel):
     host: Optional[str] = "localhost"
     port: Optional[int] = 6379
@@ -131,9 +136,10 @@ class API(BaseModel):
     http_url: Optional[str] = "0.0.0.0"
     http_port: Optional[int] = 8838
     webapp_url: Optional[str] = ""
+    singing_secret: Optional[str] = "dCQ9Su6Bez3pQCY6TPiz4Dx69sGWVyVtBBI7sZ3b1zCkqMAZhi"
     allow_origins: Optional[List[Union[str, int]]] = None
     cloudflare_turnstile: Optional[CloudflareTurnstile] = Field(default_factory=CloudflareTurnstile)
-    singing_secret: Optional[str] = "dCQ9Su6Bez3pQCY6TPiz4Dx69sGWVyVtBBI7sZ3b1zCkqMAZhi"
+    log_to_tg: Optional[LogToTG] = Field(default_factory=LogToTG)
     redis: Optional[RedisConfig] = Field(default_factory=RedisConfig)
 
     def __init__(self, **data):

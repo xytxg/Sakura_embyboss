@@ -26,7 +26,7 @@ from bot import _open, bot_token, LOGGER, api as config_api, sakura_b
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
 # ==================== 路由与模板设置 ====================
-route = APIRouter(prefix="/checkin" )
+route = APIRouter(prefix="/checkin")
 templates_path = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_path))
 
@@ -48,6 +48,12 @@ REDIS_PORT = config_api.redis.port
 REDIS_DB = config_api.redis.db
 REDIS_PASSWORD = config_api.redis.password
 DECODE_RESPONSES = config_api.redis.decode_responses
+
+TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
+TG_LOG_CHAT_ID = config_api.log_to_tg.chat_id
+TG_LOG_THREAD_ID = config_api.log_to_tg.thread_id
+_TG_LOG_CONFIG_MISSING_WARNING_SHOWN = False
+_TG_LOG_CONFIG_INVALID_WARNING_SHOWN = False
 
 redis_client = None
 try:
@@ -82,6 +88,68 @@ class CheckinVerifyRequest(BaseModel):
     page_load_time: Optional[int] = None
 
 # ==================== 工具函数 ====================
+async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str = "N/A", ua: str = "N/A"):
+    global _TG_LOG_CONFIG_MISSING_WARNING_SHOWN, _TG_LOG_CONFIG_INVALID_WARNING_SHOWN
+
+    if _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
+        return
+
+    if not TG_LOG_BOT_TOKEN or not TG_LOG_CHAT_ID:
+        if not _TG_LOG_CONFIG_MISSING_WARNING_SHOWN:
+            LOGGER.warning("TG Token 或 Chat ID 未配置，将跳过发送日志")
+            _TG_LOG_CONFIG_MISSING_WARNING_SHOWN = True
+        return
+
+    now_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
+    text = (
+        f"#用户签到通知\n\n"
+        f"📅 *签到结果:* {log_type}\n"
+        f"👤 *用户 ID:* `{user_id}`\n"
+        f"🕒 *签到时间:* `{now_str}`\n"
+        f"🌍 *IP 地址:* `{ip}`\n"
+        f"🖥️ *设备 UA:* `{ua}`"
+    )
+    if reason:
+        text += f"\n📝 *详情:* `{reason}`"
+
+    url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
+    payload = {
+        'chat_id': TG_LOG_CHAT_ID,
+        'text': text,
+        'parse_mode': 'Markdown'
+    }
+    if TG_LOG_THREAD_ID:
+        payload['message_thread_id'] = TG_LOG_THREAD_ID
+
+    try:
+        async with aiohttp.ClientSession( ) as session:
+            async with session.post(url, json=payload, timeout=10) as response:
+                if response.status == 200:
+                    return
+
+                response_data = await response.json()
+                error_desc = response_data.get('description', '未知API错误')
+                
+                is_config_error = "unauthorized" in error_desc.lower() or "chat not found" in error_desc.lower()
+
+                if is_config_error and not _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
+                    LOGGER.error(
+                        f"❌ 发送TG日志失败，疑似配置错误！"
+                        f"状态码: {response.status}, 原因: {error_desc}。"
+                        f"将禁用日志功能"
+                    )
+                    _TG_LOG_CONFIG_INVALID_WARNING_SHOWN = True
+                elif not is_config_error:
+                    LOGGER.error(f"❌ 发送TG日志失败: 状态码 {response.status}, 响应: {response_data}")
+
+    except aiohttp.ClientError as e:
+        if not _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
+             LOGGER.error(f"❌ 发送TG日志时发生网络错误: {e} 。请检查网络连接或域名解析。")
+    except Exception as e:
+        if not _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
+            LOGGER.error(f"❌ 发送TG日志时发生未知错误: {e}")
+
+
 def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
     if not init_data:
         raise HTTPException(status_code=401, detail="缺少Telegram WebApp数据")
@@ -139,7 +207,7 @@ def check_and_record_request(user_id: int, client_ip: str) -> Optional[str]:
             pipe.execute()
             return None
     except (RedisConnectionError, redis.exceptions.ResponseError) as e:
-        LOGGER.warning(f"🟡 Redis 频率控制失败: {e}. 回退到内存限频。")
+        LOGGER.warning(f"🟡 Redis 频率控制失败: {e}. 回退到内存限频")
         redis_client = None
 
     user_request_records.setdefault(user_id, [])
@@ -171,7 +239,7 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
                 return False
             return True
         except (RedisConnectionError, redis.exceptions.ResponseError) as e:
-            LOGGER.warning(f"🟡 Redis Nonce 操作失败: {e}. 回退到内存检查。")
+            LOGGER.warning(f"🟡 Redis Nonce 操作失败: {e}. 回退到内存检查")
             redis_client = None
 
     mem_nonce_key = f"nonce:{timestamp}:{nonce}"
@@ -188,14 +256,14 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
         }
         if expired_nonces:
             memory_used_nonces.difference_update(expired_nonces)
-            LOGGER.debug(f"内存Nonce清理完成，移除了 {len(expired_nonces)} 个过期Nonce。")
+            LOGGER.debug(f"内存Nonce清理完成，移除了 {len(expired_nonces)} 个过期Nonce")
 
     return True
 
 def run_all_security_checks(request: Request, data: CheckinVerifyRequest, user_agent: str) -> Optional[str]:
     if not user_agent or len(user_agent) < 10: return f"UA过短或缺失"
     for pattern in ['bot', 'crawler', 'spider', 'scraper', 'wget', 'curl', 'python-requests', 'aiohttp', 'okhttp']:
-        if pattern in user_agent.lower( ): return f"检测到 {pattern} UA"
+        if pattern in user_agent.lower(): return f"检测到 {pattern} UA"
     for header in ["host", "user-agent", "accept", "accept-language"]:
         if header not in request.headers: return f"缺少 {header} 请求头"
     
@@ -230,8 +298,10 @@ async def verify_checkin(
 
     try:
         if not _open.checkin:
-            LOGGER.warning(f"⚠️ 签到失败 (功能未开启) - {log_base_info}")
-            raise HTTPException(status_code=403, detail="签到功能未开启")
+            reason = "签到功能未开启"
+            LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
+            await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
+            raise HTTPException(status_code=403, detail=reason)
 
         rate_limit_reason = check_and_record_request(request_data.user_id, client_ip)
         if rate_limit_reason:
@@ -241,11 +311,13 @@ async def verify_checkin(
             elif rate_limit_reason == "ip_rate_limited":
                 detail_message = "当前IP地址请求过于频繁，请稍后再试"
             LOGGER.warning(f"⚠️ 签到失败 (请求频繁: {rate_limit_reason}) - {log_base_info})")
+            await send_log_to_tg('❌ 失败', request_data.user_id, f"请求频繁: {rate_limit_reason}", client_ip, user_agent)
             raise HTTPException(status_code=429, detail=detail_message)
 
         suspicion_reason = run_all_security_checks(request, request_data, user_agent)
         if suspicion_reason:
             LOGGER.warning(f"⚠️ 签到失败 (可疑行为: {suspicion_reason}) - {log_base_info}")
+            await send_log_to_tg('❌ 失败', request_data.user_id, f"可疑行为: {suspicion_reason}", client_ip, user_agent)
             raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
 
         if request_data.webapp_data:
@@ -253,37 +325,48 @@ async def verify_checkin(
                 webapp_info = verify_telegram_webapp_data(request_data.webapp_data)
                 webapp_user_id = json.loads(webapp_info.get('user', '{}')).get('id')
                 if webapp_user_id != request_data.user_id:
-                    LOGGER.warning(f"⚠️ 签到失败 (身份验证失败) - {log_base_info}")
+                    reason = "WebApp用户身份与请求不匹配"
+                    LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
+                    await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
                     raise HTTPException(status_code=401, detail="用户身份验证失败")
             except HTTPException as e:
                 if e.status_code != 401: LOGGER.error(f"❌ WebApp数据验证错误: {e.detail}")
+                await send_log_to_tg('❌ 失败', request_data.user_id, f"WebApp验证失败: {e.detail}", client_ip, user_agent)
                 raise
 
-        async with aiohttp.ClientSession( ) as session:
+        async with aiohttp.ClientSession(  ) as session:
             try:
                 async with session.post(
                     "https://challenges.cloudflare.com/turnstile/v0/siteverify",
                     data={"secret": TURNSTILE_SECRET_KEY, "response": request_data.token, "remoteip": client_ip},
-                    timeout=aiohttp.ClientTimeout(total=10 )
+                    timeout=aiohttp.ClientTimeout(total=10  )
                 ) as response:
                     result = await response.json()
                     if not result.get("success", False):
                         error_codes = result.get("error-codes", [])
-                        LOGGER.warning(f"⚠️ 签到失败 (人机验证: {error_codes}) - {log_base_info}")
+                        reason = f"人机验证失败: {error_codes}"
+                        LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
+                        await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
                         raise HTTPException(status_code=400, detail="人机验证失败，请重试")
             except aiohttp.ClientError as e:
-                LOGGER.error(f"❌ Turnstile验证网络错误: {e}" )
+                reason = f"Turnstile验证网络错误: {e}"
+                LOGGER.error(f"❌ {reason}"  )
+                await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
                 raise HTTPException(status_code=503, detail="验证服务暂时不可用")
 
         e = sql_get_emby(request_data.user_id)
         if not e:
-            LOGGER.warning(f"⚠️ 签到失败 (用户不存在) - {log_base_info}")
+            reason = "用户不存在于数据库"
+            LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
+            await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
             raise HTTPException(status_code=404, detail="未查询到用户数据")
 
         now = datetime.now(timezone(timedelta(hours=8)))
         today = now.strftime("%Y-%m-%d")
         if e.ch and e.ch.strftime("%Y-%m-%d") >= today:
-            LOGGER.info(f"ℹ️ 签到中止 (今日已签) - {log_base_info}")
+            reason = "今日已签到"
+            LOGGER.info(f"ℹ️ 签到中止 ({reason}) - {log_base_info}")
+            await send_log_to_tg('ℹ️ 已签', request_data.user_id, reason, client_ip, user_agent)
             raise HTTPException(status_code=409, detail="您今天已经签到过了，再签到剁掉你的小鸡鸡🐤")
 
         reward = random.randint(_open.checkin_reward[0], _open.checkin_reward[1])
@@ -292,10 +375,14 @@ async def verify_checkin(
         try:
             sql_update_emby(Emby.tg == request_data.user_id, iv=new_balance, ch=now)
         except Exception as db_err:
-            LOGGER.error(f"❌ 签到失败 (数据库更新错误: {db_err}) - {log_base_info}")
+            reason = f"数据库更新错误: {db_err}"
+            LOGGER.error(f"❌ 签到失败 ({reason}) - {log_base_info}")
+            await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
             raise HTTPException(status_code=500, detail="签到处理失败，请重试")
 
-        LOGGER.info(f"✔️ 签到成功 (奖励: {reward} {sakura_b}) - {log_base_info}")
+        success_reason = f"奖励: {reward} {sakura_b}, 余额: {new_balance} {sakura_b}"
+        LOGGER.info(f"✔️ 签到成功 ({success_reason}) - {log_base_info}")
+        await send_log_to_tg('✅ 成功', request_data.user_id, success_reason, client_ip, user_agent)
 
         checkin_text = f'🎉 **签到成功** | {reward} {sakura_b}\n💴 **当前持有** | {new_balance} {sakura_b}\n⏳ **签到日期** | {now.strftime("%Y-%m-%d")}'
 
@@ -314,8 +401,10 @@ async def verify_checkin(
             "should_close": True
         })
 
-    except HTTPException:
-        raise
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as final_err:
-        LOGGER.error(f"💥 签到失败 (未知错误: {final_err}) - {log_base_info}")
+        reason = f"未知错误: {final_err}"
+        LOGGER.error(f"💥 签到失败 ({reason} ) - {log_base_info}")
+        await send_log_to_tg('💥 严重失败', request_data.user_id, reason, client_ip, user_agent)
         raise HTTPException(status_code=500, detail="服务器内部错误")

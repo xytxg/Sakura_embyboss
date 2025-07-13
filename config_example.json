@@ -104,6 +104,7 @@
     "http_url": "0.0.0.0",
     "http_port": 8838,
     "webapp_url": "",
+    "singing_secret": "dCQ9Su6Bez3pQCY6TPiz4Dx69sGWVyVtBBI7sZ3b1zCkqMAZhi",
     "allow_origins": [
       "*"
     ],
@@ -111,7 +112,11 @@
       "site_key": "",
       "secret_key": ""
     },
-    "singing_secret": "dCQ9Su6Bez3pQCY6TPiz4Dx69sGWVyVtBBI7sZ3b1zCkqMAZhi",
+    "log_to_tg": {
+      "bot_token": "",
+      "chat_id": "",
+      "thread_id": ""
+    },
     "redis": {
       "host": "localhost",
       "port": 6379,
