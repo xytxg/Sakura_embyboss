@@ -112,7 +112,7 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
         f"#用户签到通知\n\n"
         f"📅 *签到结果:* {log_type}\n"
         f"🕒 *签到时间:* `{now_str}`\n"
-        f"👤 *签到用户:* [{user_name}](tg://user?id={user_id} - `{user_id}`\n"
+        f"👤 *签到用户:* [{user_name}](tg://user?id={user_id}) - `{user_id}`\n"
         f"🌍 *用户 IP:* `{ip}`\n"
         f"🖥️ *设备 UA:* `{ua}`"
     )
