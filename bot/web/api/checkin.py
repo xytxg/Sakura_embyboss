@@ -16,6 +16,7 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
+from bot import bot
 from fastapi import APIRouter, Request, HTTPException, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -100,17 +101,23 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
             _TG_LOG_CONFIG_MISSING_WARNING_SHOWN = True
         return
 
+    try:
+        first = await bot.get_chat(user_id)
+        user_name = first.first_name if not first.username else first.username
+    except Exception as e:
+        user_name = "无法获取昵称"
+
     now_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
     text = (
         f"#用户签到通知\n\n"
         f"📅 *签到结果:* {log_type}\n"
-        f"👤 *用户 ID:* `{user_id}`\n"
         f"🕒 *签到时间:* `{now_str}`\n"
-        f"🌍 *IP 地址:* `{ip}`\n"
+        f"👤 *签到用户:* [{user_name}](tg://user?id={user_id} - `{user_id}`\n"
+        f"🌍 *用户 IP:* `{ip}`\n"
         f"🖥️ *设备 UA:* `{ua}`"
     )
     if reason:
-        text += f"\n📝 *详情:* `{reason}`"
+        text += f"\n📝 *详情* - {reason}"
 
     url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
     payload = {
