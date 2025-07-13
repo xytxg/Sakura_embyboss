@@ -54,7 +54,6 @@ TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
 TG_LOG_CHAT_ID = config_api.log_to_tg.chat_id
 TG_LOG_THREAD_ID = config_api.log_to_tg.thread_id
 _TG_LOG_CONFIG_MISSING_WARNING_SHOWN = False
-_TG_LOG_CONFIG_INVALID_WARNING_SHOWN = False
 
 redis_client = None
 try:
@@ -90,10 +89,7 @@ class CheckinVerifyRequest(BaseModel):
 
 # ==================== 工具函数 ====================
 async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str = "N/A", ua: str = "N/A"):
-    global _TG_LOG_CONFIG_MISSING_WARNING_SHOWN, _TG_LOG_CONFIG_INVALID_WARNING_SHOWN
-
-    if _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
-        return
+    global _TG_LOG_CONFIG_MISSING_WARNING_SHOWN
 
     if not TG_LOG_BOT_TOKEN or not TG_LOG_CHAT_ID:
         if not _TG_LOG_CONFIG_MISSING_WARNING_SHOWN:
@@ -114,10 +110,10 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
         f"🕒 *签到时间:* `{now_str}`\n"
         f"👤 *签到用户:* [{user_name}](tg://user?id={user_id}) - `{user_id}`\n"
         f"🌍 *用户 IP:* `{ip}`\n"
-        f"🖥️ *设备 UA:* `{ua}`"
+        f"```UserAgent\n{ua}```"
     )
     if reason:
-        text += f"\n📝 *详情* - {reason}"
+        text += f"\n📝 {reason}"
 
     url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
     payload = {
@@ -136,26 +132,15 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
 
                 response_data = await response.json()
                 error_desc = response_data.get('description', '未知API错误')
-                
-                is_config_error = "unauthorized" in error_desc.lower() or "chat not found" in error_desc.lower()
-
-                if is_config_error and not _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
-                    LOGGER.error(
-                        f"❌ 发送TG日志失败，疑似配置错误！"
-                        f"状态码: {response.status}, 原因: {error_desc}。"
-                        f"将禁用日志功能"
-                    )
-                    _TG_LOG_CONFIG_INVALID_WARNING_SHOWN = True
-                elif not is_config_error:
-                    LOGGER.error(f"❌ 发送TG日志失败: 状态码 {response.status}, 响应: {response_data}")
+                LOGGER.error(
+                    f"❌ 发送TG日志失败！"
+                    f"状态码: {response.status}, 原因: {error_desc}"
+                )
 
     except aiohttp.ClientError as e:
-        if not _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
-             LOGGER.error(f"❌ 发送TG日志时发生网络错误: {e} 。请检查网络连接或域名解析。")
+        LOGGER.error(f"❌ 发送TG日志时发生网络错误: {e}，请检查网络连接或域名解析")
     except Exception as e:
-        if not _TG_LOG_CONFIG_INVALID_WARNING_SHOWN:
-            LOGGER.error(f"❌ 发送TG日志时发生未知错误: {e}")
-
+        LOGGER.error(f"❌ 发送TG日志时发生未知错误: {e}")
 
 def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
     if not init_data:
