@@ -1,211 +1,237 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <script>
-    function performSecurityChecks() {
-      if (typeof tg === 'undefined' || !tg.initData) {
-        console.error('非 Telegram WebApp 环境');
-        window.location.href = 'https://google.com';
-        return false;
-      }
-      return true;
-    }
-  </script>
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>每日签到</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
-  <style>
-    :root {
-      --bg-primary: #f7f7f8;
-      --bg-secondary: #fff;
-      --text-primary: #1c1c1e;
-      --text-secondary: #5e5e5e;
-      --accent-color: #ff4b5c;
-      --button-bg: #007aff;
-      --button-hover: #0051a8;
-      --border-color: #ccc;
-      --shadow: rgba(0, 0, 0, 0.1);
-      --success-bg: #d4edda;
-      --success-text: #155724;
-      --success-border: #c3e6cb;
-      --error-bg: #f8d7da;
-      --error-text: #721c24;
-      --error-border: #f5c6cb;
-      --warning-bg: #fff3cd;
-      --warning-text: #856404;
-      --warning-border: #ffeaa7;
-    }
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>每日签到</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+    {% if recaptcha_site_key %}
+    <script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}" async defer></script>
+    {% endif %}
+    <script>
+        (function() {
+          if (
+            typeof window.Telegram === 'undefined' ||
+            typeof window.Telegram.WebApp === 'undefined' ||
+            !window.Telegram.WebApp.initData
+          ) {
+            try {
+              window.stop();
+            } catch (e) {
+              document.execCommand('Stop');
+            }
+        
+            document.documentElement.innerHTML = '';
+            document.title = '非法访问';
+        
+            throw new Error("非法访问");
+          }
+        })();
+    </script>
 
-    .dark-theme {
-      --bg-primary: #1a1a1a;
-      --bg-secondary: #2a2a2a;
-      --text-primary: #ffffff;
-      --text-secondary: #b0b0b0;
-      --accent-color: #ff6b7d;
-      --button-bg: #0a84ff;
-      --button-hover: #0056cc;
-      --border-color: #404040;
-      --shadow: rgba(0, 0, 0, 0.3);
-      --success-bg: #1e3a28;
-      --success-text: #4ade80;
-      --success-border: #16a34a;
-      --error-bg: #3a1e1e;
-      --error-text: #f87171;
-      --error-border: #dc2626;
-      --warning-bg: #3a2e1e;
-      --warning-text: #fbbf24;
-      --warning-border: #f59e0b;
-    }
-
-    * {
-      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.2s ease;
-    }
-
-    html, body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background-color: var(--bg-primary);
-      color: var(--text-primary);
-      margin: 0;
-      padding: 0;
-      height: 100vh;
-      overflow: hidden;
-      position: fixed;
-      width: 100%;
-    }
-
-    body {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      padding: 0 20px;
-      box-sizing: border-box;
-    }
-
-    .container {
-      text-align: center;
-      background-color: var(--bg-secondary);
-      padding: 40px;
-      border-radius: 20px;
-      box-shadow: 0 10px 20px var(--shadow);
-      max-width: 500px;
-      width: 100%;
-    }
-
-    .title, h1 {
-      color: var(--accent-color);
-      font-size: 2.4em;
-      margin-bottom: 20px;
-      font-weight: 700;
-    }
-
-    p {
-      font-size: 1.1em;
-      line-height: 1.6;
-      margin-bottom: 30px;
-      color: var(--text-secondary);
-    }
-
-    .check-in-btn, button {
-      font-size: 1.1em;
-      padding: 14px 0;
-      background-color: var(--button-bg);
-      color: white;
-      border: none;
-      border-radius: 12px;
-      cursor: pointer;
-      width: 100%;
-      font-weight: 600;
-    }
-
-    .check-in-btn:hover:not(:disabled), 
-    button:hover:not(:disabled) {
-      background-color: var(--button-hover);
-      transform: translateY(-3px);
-      box-shadow: 0 8px 15px var(--shadow);
-    }
-
-    .check-in-btn:active:not(:disabled), 
-    button:active:not(:disabled) {
-      transform: translateY(2px);
-      box-shadow: 0 2px 4px var(--shadow);
-    }
-
-    .check-in-btn:disabled {
-      background-color: var(--border-color);
-      cursor: not-allowed;
-      transform: none;
-      box-shadow: none;
-    }
-
-    .turnstile-container {
-      margin: 20px 0;
-      display: flex;
-      justify-content: center;
-    }
-
-    .loading, .result {
-      display: none;
-      margin-top: 20px;
-      font-size: 1em;
-      padding: 15px;
-      border-radius: 10px;
-      word-break: break-all;
-    }
-
-    .loading {
-      color: var(--button-bg);
-    }
-
-    .result.success {
-      background-color: var(--success-bg);
-      color: var(--success-text);
-      border: 1px solid var(--success-border);
-    }
-
-    .result.error {
-      background-color: var(--error-bg);
-      color: var(--error-text);
-      border: 1px solid var(--error-border);
-    }
-
-    .result.warning {
-      background-color: var(--warning-bg);
-      color: var(--warning-text);
-      border: 1px solid var(--warning-border);
-    }
-
-    .network-tip {
-      margin-top: 15px;
-      font-size: 0.9em;
-      padding: 12px;
-      border-radius: 8px;
-      background-color: var(--warning-bg);
-      color: var(--warning-text);
-      border: 1px solid var(--warning-border);
-    }
-
-    @media (max-width: 600px) {
-      .container {
-        padding: 25px;
-      }
-
-      .title, h1 {
-        font-size: 2em;
-      }
-
-      p {
-        font-size: 1em;
-      }
-
-      .check-in-btn, button {
-        font-size: 1em;
-        padding: 12px 0;
-      }
-    }
-  </style>
+    <style>
+        :root {
+          --bg-primary: #f7f7f8;
+          --bg-secondary: #fff;
+          --text-primary: #1c1c1e;
+          --text-secondary: #5e5e5e;
+          --accent-color: #ff4b5c;
+          --button-bg: #007aff;
+          --button-hover: #0051a8;
+          --border-color: #ccc;
+          --shadow: rgba(0, 0, 0, 0.1);
+          --success-bg: #d4edda;
+          --success-text: #155724;
+          --success-border: #c3e6cb;
+          --error-bg: #f8d7da;
+          --error-text: #721c24;
+          --error-border: #f5c6cb;
+          --warning-bg: #fff3cd;
+          --warning-text: #856404;
+          --warning-border: #ffeaa7;
+        }
+    
+        .dark-theme {
+          --bg-primary: #1a1a1a;
+          --bg-secondary: #2a2a2a;
+          --text-primary: #ffffff;
+          --text-secondary: #b0b0b0;
+          --accent-color: #ff6b7d;
+          --button-bg: #0a84ff;
+          --button-hover: #0056cc;
+          --border-color: #404040;
+          --shadow: rgba(0, 0, 0, 0.3);
+          --success-bg: #1e3a28;
+          --success-text: #4ade80;
+          --success-border: #16a34a;
+          --error-bg: #3a1e1e;
+          --error-text: #f87171;
+          --error-border: #dc2626;
+          --warning-bg: #3a2e1e;
+          --warning-text: #fbbf24;
+          --warning-border: #f59e0b;
+        }
+    
+        * {
+          transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.2s ease;
+        }
+    
+        html, body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          background-color: var(--bg-primary);
+          color: var(--text-primary);
+          margin: 0;
+          padding: 0;
+          height: 100vh;
+          overflow: hidden;
+          position: fixed;
+          width: 100%;
+        }
+    
+        body {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          padding: 0 20px;
+          box-sizing: border-box;
+        }
+    
+        .container {
+          text-align: center;
+          background-color: var(--bg-secondary);
+          padding: 40px;
+          border-radius: 20px;
+          box-shadow: 0 10px 20px var(--shadow);
+          max-width: 500px;
+          width: 100%;
+        }
+    
+        .title, h1 {
+          color: var(--accent-color);
+          font-size: 2.4em;
+          margin-bottom: 20px;
+          font-weight: 700;
+        }
+    
+        p {
+          font-size: 1.1em;
+          line-height: 1.6;
+          margin-bottom: 30px;
+          color: var(--text-secondary);
+        }
+    
+        .check-in-btn, button {
+          font-size: 1.1em;
+          padding: 14px 0;
+          background-color: var(--button-bg);
+          color: white;
+          border: none;
+          border-radius: 12px;
+          cursor: pointer;
+          width: 100%;
+          font-weight: 600;
+        }
+    
+        .check-in-btn:hover:not(:disabled), 
+        button:hover:not(:disabled) {
+          background-color: var(--button-hover);
+          transform: translateY(-3px);
+          box-shadow: 0 8px 15px var(--shadow);
+        }
+    
+        .check-in-btn:active:not(:disabled), 
+        button:active:not(:disabled) {
+          transform: translateY(2px);
+          box-shadow: 0 2px 4px var(--shadow);
+        }
+    
+        .check-in-btn:disabled {
+          background-color: var(--border-color);
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
+        }
+    
+        .turnstile-container {
+          margin: 20px 0;
+          display: flex;
+          justify-content: center;
+        }
+    
+        .loading, .result {
+          display: none;
+          margin-top: 20px;
+          font-size: 1em;
+          padding: 15px;
+          border-radius: 10px;
+          word-break: break-all;
+        }
+    
+        .loading {
+          color: var(--button-bg);
+        }
+    
+        .result.success {
+          background-color: var(--success-bg);
+          color: var(--success-text);
+          border: 1px solid var(--success-border);
+        }
+    
+        .result.error {
+          background-color: var(--error-bg);
+          color: var(--error-text);
+          border: 1px solid var(--error-border);
+        }
+    
+        .result.warning {
+          background-color: var(--warning-bg);
+          color: var(--warning-text);
+          border: 1px solid var(--warning-border);
+        }
+    
+        .network-tip {
+          margin-top: 15px;
+          font-size: 0.9em;
+          padding: 12px;
+          border-radius: 8px;
+          background-color: var(--warning-bg);
+          color: var(--warning-text);
+          border: 1px solid var(--warning-border);
+        }
+    
+        .verification-status {
+          margin: 10px 0;
+          font-size: 0.9em;
+          padding: 8px;
+          border-radius: 6px;
+          background-color: var(--warning-bg);
+          color: var(--warning-text);
+          border: 1px solid var(--warning-border);
+        }
+    
+        @media (max-width: 600px) {
+          .container {
+            padding: 25px;
+          }
+    
+          .title, h1 {
+            font-size: 2em;
+          }
+    
+          p {
+            font-size: 1em;
+          }
+    
+          .check-in-btn, button {
+            font-size: 1em;
+            padding: 12px 0;
+          }
+        }
+    </style>
 </head>
+
 <body>
     <div class="container">
         <div class="title">每日签到</div>
@@ -227,6 +253,8 @@
         let userId = null;
         let turnstileWidgetId = null;
         let pageLoadTime = Date.now();
+        let recaptchaSiteKey = '{{ recaptcha_site_key }}';
+        let isRecaptchaEnabled = recaptchaSiteKey && recaptchaSiteKey.trim() !== '';
 
         let requestAttempts = 0;
         const maxAttempts = 1;
@@ -313,7 +341,7 @@
         function onTurnstileLoad() {
             const isDark = tg.colorScheme === 'dark';
             turnstileWidgetId = turnstile.render('#turnstile-container', {
-                sitekey: '{{ site_key }}',
+                sitekey: '{{ turnstile_site_key }}',
                 theme: isDark ? 'dark' : 'light',
                 callback: function(token) {
                     const checkinBtn = document.getElementById('checkinBtn');
@@ -331,6 +359,25 @@
                     showError('人机验证失败，请刷新页面重试');
                 }
             });
+        }
+
+        async function getRecaptchaToken() {
+            if (!isRecaptchaEnabled || typeof grecaptcha === 'undefined') {
+                return null;
+            }
+
+            try {
+                return await new Promise((resolve, reject) => {
+                    grecaptcha.ready(() => {
+                        grecaptcha.execute(recaptchaSiteKey, { action: 'checkin' })
+                            .then(resolve)
+                            .catch(reject);
+                    });
+                });
+            } catch (error) {
+                console.error('reCAPTCHA token 获取失败:', error);
+                return null;
+            }
         }
 
         function showSuccess(message) {
@@ -358,7 +405,6 @@
         }
 
         function canClick() {
-
             if (requestAttempts >= maxAttempts) {
                 alert('签到尝试次数过多，请刷新页面重试');
                 return false;
@@ -392,6 +438,7 @@
             requestAttempts++;
 
             document.getElementById('result').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
 
             try {
                 const timestamp = Math.floor(Date.now() / 1000);
@@ -399,7 +446,7 @@
 
                 const requestData = {
                     user_id: parseInt(userInfo.user_id),
-                    token: token,
+                    turnstile_token: token,
                     timestamp: timestamp,
                     nonce: nonce,
                     webapp_data: tg.initData || null,
@@ -407,6 +454,18 @@
                     session_duration: Date.now() - userBehavior.startTime,
                     page_load_time: pageLoadTime
                 };
+
+                if (isRecaptchaEnabled) {
+                    const recaptchaToken = await getRecaptchaToken();
+                    if (recaptchaToken) {
+                        requestData.recaptcha_token = recaptchaToken;
+                    } else {
+                        showError('reCAPTCHA 验证失败，请重试');
+                        this.disabled = false;
+                        this.textContent = '重新签到';
+                        return;
+                    }
+                }
 
                 if (userInfo.chat_id && userInfo.message_id) {
                     requestData.chat_id = parseInt(userInfo.chat_id);
@@ -518,8 +577,6 @@
         });
 
         window.onload = function() {
-            performSecurityChecks();
-
             applyTheme();
             getUserInfo();
 
@@ -529,6 +586,11 @@
                 onTurnstileLoad();
             } else {
                 window.onloadTurnstileCallback = onTurnstileLoad;
+            }
+
+            if (isRecaptchaEnabled && typeof grecaptcha !== 'undefined') {
+                grecaptcha.ready(() => {
+                });
             }
 
             setTimeout(() => {
@@ -541,4 +603,5 @@
         });
     </script>
 </body>
+
 </html>

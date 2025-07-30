@@ -35,6 +35,9 @@ templates = Jinja2Templates(directory=str(templates_path))
 TURNSTILE_SITE_KEY = config_api.cloudflare_turnstile.site_key
 TURNSTILE_SECRET_KEY = config_api.cloudflare_turnstile.secret_key
 
+RECAPTCHA_SITE_KEY = config_api.google_recaptcha.site_key
+RECAPTCHA_SECRET_KEY = config_api.google_recaptcha.secret_key
+
 SIGNING_SECRET = config_api.singing_secret
 
 MAX_REQUEST_AGE = 5
@@ -76,7 +79,8 @@ memory_used_nonces: set = set()
 
 # ==================== 请求模型 ====================
 class CheckinVerifyRequest(BaseModel):
-    token: str
+    turnstile_token: str
+    recaptcha_token: Optional[str] = None
     user_id: int
     chat_id: Optional[int] = None
     message_id: Optional[int] = None
@@ -252,6 +256,39 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
 
     return True
 
+async def verify_recaptcha_v3(token: str, client_ip: str) -> bool:
+    if not RECAPTCHA_SECRET_KEY or not token:
+        return False
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://www.google.com/recaptcha/api/siteverify",
+                data={
+                    "secret": RECAPTCHA_SECRET_KEY,
+                    "response": token,
+                    "remoteip": client_ip
+                },
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                result = await response.json()
+                
+                success = result.get("success", False)
+                score = result.get("score", 0.0)
+                
+                if success and score >= 0.5:
+                    return True
+                else:
+                    LOGGER.warning(f"reCAPTCHA 验证失败: success={success}, score={score}")
+                    return False
+                    
+    except aiohttp.ClientError as e:
+        LOGGER.error(f"reCAPTCHA 验证网络错误: {e}")
+        return False
+    except Exception as e:
+        LOGGER.error(f"reCAPTCHA 验证未知错误: {e}")
+        return False
+
 def run_all_security_checks(request: Request, data: CheckinVerifyRequest, user_agent: str) -> Optional[str]:
     if not user_agent or len(user_agent) < 10: return f"UA过短或缺失"
     for pattern in ['bot', 'crawler', 'spider', 'scraper', 'wget', 'curl', 'python-requests', 'aiohttp', 'okhttp']:
@@ -275,7 +312,11 @@ def run_all_security_checks(request: Request, data: CheckinVerifyRequest, user_a
 async def checkin_page(request: Request):
     return templates.TemplateResponse(
         "checkin.html",
-        {"request": request, "site_key": TURNSTILE_SITE_KEY}
+        {
+            "request": request, 
+            "turnstile_site_key": TURNSTILE_SITE_KEY,
+            "recaptcha_site_key": RECAPTCHA_SITE_KEY
+        }
     )
 
 @route.post("/verify")
@@ -326,17 +367,17 @@ async def verify_checkin(
                 await send_log_to_tg('❌ 失败', request_data.user_id, f"WebApp验证失败: {e.detail}", client_ip, user_agent)
                 raise
 
-        async with aiohttp.ClientSession(  ) as session:
+        async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(
                     "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                    data={"secret": TURNSTILE_SECRET_KEY, "response": request_data.token, "remoteip": client_ip},
-                    timeout=aiohttp.ClientTimeout(total=10  )
+                    data={"secret": TURNSTILE_SECRET_KEY, "response": request_data.turnstile_token, "remoteip": client_ip},
+                    timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     result = await response.json()
                     if not result.get("success", False):
                         error_codes = result.get("error-codes", [])
-                        reason = f"人机验证失败: {error_codes}"
+                        reason = f"Turnstile人机验证失败: {error_codes}"
                         LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
                         await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
                         raise HTTPException(status_code=400, detail="人机验证失败，请重试")
@@ -345,6 +386,20 @@ async def verify_checkin(
                 LOGGER.error(f"❌ {reason}"  )
                 await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
                 raise HTTPException(status_code=503, detail="验证服务暂时不可用")
+
+        if RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY:
+            if not request_data.recaptcha_token:
+                reason = "缺少reCAPTCHA验证"
+                LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
+                await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
+                raise HTTPException(status_code=400, detail="缺少reCAPTCHA验证，请重试")
+            
+            recaptcha_valid = await verify_recaptcha_v3(request_data.recaptcha_token, client_ip)
+            if not recaptcha_valid:
+                reason = "reCAPTCHA验证失败"
+                LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
+                await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
+                raise HTTPException(status_code=400, detail="reCAPTCHA验证失败，请重试")
 
         e = sql_get_emby(request_data.user_id)
         if not e:
@@ -372,7 +427,12 @@ async def verify_checkin(
             await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
             raise HTTPException(status_code=500, detail="签到处理失败，请重试")
 
-        success_reason = f"奖励: {reward} {sakura_b}, 余额: {new_balance} {sakura_b}"
+        verification_methods = ["Turnstile"]
+        if RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY:
+            verification_methods.append("reCAPTCHA")
+        verification_info = " + ".join(verification_methods)
+        
+        success_reason = f"奖励: {reward} {sakura_b}, 余额: {new_balance} {sakura_b}, 验证: {verification_info}"
         LOGGER.info(f"✔️ 签到成功 ({success_reason}) - {log_base_info}")
         await send_log_to_tg('✅ 成功', request_data.user_id, success_reason, client_ip, user_agent)
 
@@ -393,10 +453,10 @@ async def verify_checkin(
             "should_close": True
         })
 
-    except HTTPException as http_exc:
-        raise http_exc
-    except Exception as final_err:
-        reason = f"未知错误: {final_err}"
-        LOGGER.error(f"💥 签到失败 ({reason} ) - {log_base_info}")
-        await send_log_to_tg('💥 严重失败', request_data.user_id, reason, client_ip, user_agent)
+    except HTTPException as http_ex:
+        raise http_ex
+    except Exception as e:
+        reason = f"未知错误: {e}"
+        LOGGER.error(f"❌ 签到失败 ({reason}) - {log_base_info}")
+        await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
         raise HTTPException(status_code=500, detail="服务器内部错误")

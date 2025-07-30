@@ -112,6 +112,10 @@
       "site_key": "",
       "secret_key": ""
     },
+    "google_recaptcha": {
+      "site_key": "",
+      "secret_key": ""
+    },
     "log_to_tg": {
       "bot_token": "",
       "chat_id": "",
