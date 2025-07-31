@@ -35,8 +35,8 @@ templates = Jinja2Templates(directory=str(templates_path))
 TURNSTILE_SITE_KEY = config_api.cloudflare_turnstile.site_key
 TURNSTILE_SECRET_KEY = config_api.cloudflare_turnstile.secret_key
 
-RECAPTCHA_SITE_KEY = config_api.google_recaptcha.site_key
-RECAPTCHA_SECRET_KEY = config_api.google_recaptcha.secret_key
+RECAPTCHA_V3_SITE_KEY = config_api.google_recaptcha_v3.site_key
+RECAPTCHA_V3_SECRET_KEY = config_api.google_recaptcha_v3.secret_key
 
 SIGNING_SECRET = config_api.singing_secret
 
@@ -80,7 +80,7 @@ memory_used_nonces: set = set()
 # ==================== 请求模型 ====================
 class CheckinVerifyRequest(BaseModel):
     turnstile_token: str
-    recaptcha_token: Optional[str] = None
+    recaptcha_v3_token: Optional[str] = None
     user_id: int
     chat_id: Optional[int] = None
     message_id: Optional[int] = None
@@ -129,7 +129,7 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
         payload['message_thread_id'] = TG_LOG_THREAD_ID
 
     try:
-        async with aiohttp.ClientSession( ) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as response:
                 if response.status == 200:
                     return
@@ -148,29 +148,29 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
 
 def verify_telegram_webapp_data(init_data: str) -> Dict[str, Any]:
     if not init_data:
-        raise HTTPException(status_code=401, detail="缺少Telegram WebApp数据")
+        raise HTTPException(status_code=401, detail="请求异常，请重试")
 
     try:
         parsed_data = {k: urllib.parse.unquote(v) for k, v in (item.split('=', 1) for item in init_data.split('&'))}
         received_hash = parsed_data.pop('hash', '')
         if not received_hash:
-            raise HTTPException(status_code=401, detail="缺少数据完整性验证")
+            raise HTTPException(status_code=401, detail="请求异常，请重试")
 
         data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
         expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
         if not hmac.compare_digest(received_hash, expected_hash):
-            raise HTTPException(status_code=401, detail="Telegram数据验证失败")
+            raise HTTPException(status_code=401, detail="请求异常，请重试")
 
         auth_date = int(parsed_data.get('auth_date', 0))
         if time.time() - auth_date > 3600:
-            raise HTTPException(status_code=401, detail="认证数据过期")
+            raise HTTPException(status_code=401, detail="请求异常，请重试")
 
         return parsed_data
     except Exception as e:
         LOGGER.error(f"❌ Telegram WebApp数据验证失败: {e}")
-        raise HTTPException(status_code=401, detail="数据验证失败")
+        raise HTTPException(status_code=401, detail="请求异常，请重试")
 
 def check_and_record_request(user_id: int, client_ip: str) -> Optional[str]:
     global redis_client
@@ -191,9 +191,9 @@ def check_and_record_request(user_id: int, client_ip: str) -> Optional[str]:
             user_count, ip_count = results[2], results[3]
             
             if user_count >= MAX_REQUESTS_PER_HOUR:
-                return "user_rate_limited"
+                return "用户请求频繁"
             if ip_count >= MAX_REQUESTS_PER_HOUR:
-                return "ip_rate_limited"
+                return "IP请求频繁"
             
             pipe = redis_client.pipeline()
             pipe.zadd(user_key, {str(now): now})
@@ -212,9 +212,9 @@ def check_and_record_request(user_id: int, client_ip: str) -> Optional[str]:
     ip_request_records[client_ip] = [t for t in ip_request_records[client_ip] if now - t < RATE_LIMIT_WINDOW]
     
     if len(user_request_records[user_id]) >= MAX_REQUESTS_PER_HOUR:
-        return "user_rate_limited"
+        return "用户请求频繁"
     if len(ip_request_records[client_ip]) >= MAX_REQUESTS_PER_HOUR:
-        return "ip_rate_limited"
+        return "IP请求频繁"
 
     user_request_records[user_id].append(now)
     ip_request_records[client_ip].append(now)
@@ -256,16 +256,16 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
 
     return True
 
-async def verify_recaptcha_v3(token: str, client_ip: str) -> bool:
-    if not RECAPTCHA_SECRET_KEY or not token:
-        return False
+async def verify_recaptcha_v3(token: str, client_ip: str) -> (bool, float, Optional[str]):
+    if not RECAPTCHA_V3_SECRET_KEY or not token:
+        return False, -1.0, "服务器未配置reCAPTCHAv3或客户端未提供token"
     
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 "https://www.google.com/recaptcha/api/siteverify",
                 data={
-                    "secret": RECAPTCHA_SECRET_KEY,
+                    "secret": RECAPTCHA_V3_SECRET_KEY,
                     "response": token,
                     "remoteip": client_ip
                 },
@@ -276,18 +276,20 @@ async def verify_recaptcha_v3(token: str, client_ip: str) -> bool:
                 success = result.get("success", False)
                 score = result.get("score", 0.0)
                 
-                if success and score >= 0.5:
-                    return True
+                if success and score >= 0.3:
+                    return True, score, None
                 else:
-                    LOGGER.warning(f"reCAPTCHA 验证失败: success={success}, score={score}")
-                    return False
+                    reason = f"reCAPTCHAv3验证失败: success={success}, score={score}"
+                    return False, score, reason
                     
     except aiohttp.ClientError as e:
-        LOGGER.error(f"reCAPTCHA 验证网络错误: {e}")
-        return False
+        reason = f"reCAPTCHA v3验证网络错误: {e}"
+        LOGGER.error(reason )
+        return False, -1.0, reason
     except Exception as e:
-        LOGGER.error(f"reCAPTCHA 验证未知错误: {e}")
-        return False
+        reason = f"reCAPTCHA v3验证未知错误: {e}"
+        LOGGER.error(reason)
+        return False, -1.0, reason
 
 def run_all_security_checks(request: Request, data: CheckinVerifyRequest, user_agent: str) -> Optional[str]:
     if not user_agent or len(user_agent) < 10: return f"UA过短或缺失"
@@ -315,7 +317,7 @@ async def checkin_page(request: Request):
         {
             "request": request, 
             "turnstile_site_key": TURNSTILE_SITE_KEY,
-            "recaptcha_site_key": RECAPTCHA_SITE_KEY
+            "recaptcha_v3_site_key": RECAPTCHA_V3_SITE_KEY
         }
     )
 
@@ -328,6 +330,7 @@ async def verify_checkin(
 ):
     client_ip = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else request.client.host
     log_base_info = f"用户: {request_data.user_id}, IP: {client_ip}, UA: {user_agent}"
+    recaptcha_v3_score = -1.0
 
     try:
         if not _open.checkin:
@@ -338,11 +341,11 @@ async def verify_checkin(
 
         rate_limit_reason = check_and_record_request(request_data.user_id, client_ip)
         if rate_limit_reason:
-            detail_message = "请求过于频繁，请稍后再试"
-            if rate_limit_reason == "user_rate_limited":
-                detail_message = "您的签到请求过于频繁，请稍后再试"
-            elif rate_limit_reason == "ip_rate_limited":
-                detail_message = "当前IP地址请求过于频繁，请稍后再试"
+            detail_message = "请求过于频繁，请稍后重试"
+            if rate_limit_reason == "用户请求频繁":
+                detail_message = "您的签到请求过于频繁，请稍后重试"
+            elif rate_limit_reason == "IP请求频繁":
+                detail_message = "当前IP地址请求过于频繁，请稍后重试"
             LOGGER.warning(f"⚠️ 签到失败 (请求频繁: {rate_limit_reason}) - {log_base_info})")
             await send_log_to_tg('❌ 失败', request_data.user_id, f"请求频繁: {rate_limit_reason}", client_ip, user_agent)
             raise HTTPException(status_code=429, detail=detail_message)
@@ -351,7 +354,7 @@ async def verify_checkin(
         if suspicion_reason:
             LOGGER.warning(f"⚠️ 签到失败 (可疑行为: {suspicion_reason}) - {log_base_info}")
             await send_log_to_tg('❌ 失败', request_data.user_id, f"可疑行为: {suspicion_reason}", client_ip, user_agent)
-            raise HTTPException(status_code=403, detail="检测到可疑行为，请求被拒绝")
+            raise HTTPException(status_code=403, detail="请求异常，请重试")
 
         if request_data.webapp_data:
             try:
@@ -361,7 +364,7 @@ async def verify_checkin(
                     reason = "WebApp用户身份与请求不匹配"
                     LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
                     await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-                    raise HTTPException(status_code=401, detail="用户身份验证失败")
+                    raise HTTPException(status_code=401, detail="请求异常，请重试")
             except HTTPException as e:
                 if e.status_code != 401: LOGGER.error(f"❌ WebApp数据验证错误: {e.detail}")
                 await send_log_to_tg('❌ 失败', request_data.user_id, f"WebApp验证失败: {e.detail}", client_ip, user_agent)
@@ -380,40 +383,41 @@ async def verify_checkin(
                         reason = f"Turnstile人机验证失败: {error_codes}"
                         LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
                         await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-                        raise HTTPException(status_code=400, detail="人机验证失败，请重试")
+                        raise HTTPException(status_code=400, detail="请求异常，请重试")
             except aiohttp.ClientError as e:
                 reason = f"Turnstile验证网络错误: {e}"
-                LOGGER.error(f"❌ {reason}"  )
+                LOGGER.error(f"❌ {reason}")
                 await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-                raise HTTPException(status_code=503, detail="验证服务暂时不可用")
+                raise HTTPException(status_code=503, detail="服务异常，请重试")
 
-        if RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY:
-            if not request_data.recaptcha_token:
-                reason = "缺少reCAPTCHA验证"
+        if RECAPTCHA_V3_SITE_KEY and RECAPTCHA_V3_SECRET_KEY:
+            if not request_data.recaptcha_v3_token:
+                reason = "缺少reCAPTCHAv3验证"
                 LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
                 await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-                raise HTTPException(status_code=400, detail="缺少reCAPTCHA验证，请重试")
+                raise HTTPException(status_code=400, detail="请求异常，请重试")
             
-            recaptcha_valid = await verify_recaptcha_v3(request_data.recaptcha_token, client_ip)
-            if not recaptcha_valid:
-                reason = "reCAPTCHA验证失败"
+            recaptcha_v3_valid, recaptcha_v3_score, recaptcha_v3_reason = await verify_recaptcha_v3(request_data.recaptcha_v3_token, client_ip)
+            if not recaptcha_v3_valid:
+                reason = recaptcha_v3_reason or "reCAPTCHAv3验证失败"
                 LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
                 await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-                raise HTTPException(status_code=400, detail="reCAPTCHA验证失败，请重试")
+                raise HTTPException(status_code=400, detail="请求异常，请重试")
 
         e = sql_get_emby(request_data.user_id)
         if not e:
             reason = "用户不存在于数据库"
             LOGGER.warning(f"⚠️ 签到失败 ({reason}) - {log_base_info}")
             await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-            raise HTTPException(status_code=404, detail="未查询到用户数据")
+            raise HTTPException(status_code=404, detail="请求异常，请重试")
 
         now = datetime.now(timezone(timedelta(hours=8)))
         today = now.strftime("%Y-%m-%d")
         if e.ch and e.ch.strftime("%Y-%m-%d") >= today:
             reason = "今日已签到"
-            LOGGER.info(f"ℹ️ 签到中止 ({reason}) - {log_base_info}")
-            await send_log_to_tg('ℹ️ 已签', request_data.user_id, reason, client_ip, user_agent)
+            log_reason = f"{reason}: reCAPTCHAv3 - {recaptcha_v3_score}分" if recaptcha_v3_score != -1.0 else reason
+            LOGGER.info(f"ℹ️ 签到中止 ({log_reason}) - {log_base_info}")
+            await send_log_to_tg('ℹ️ 已签', request_data.user_id, log_reason, client_ip, user_agent)
             raise HTTPException(status_code=409, detail="您今天已经签到过了，再签到剁掉你的小鸡鸡🐤")
 
         reward = random.randint(_open.checkin_reward[0], _open.checkin_reward[1])
@@ -425,11 +429,11 @@ async def verify_checkin(
             reason = f"数据库更新错误: {db_err}"
             LOGGER.error(f"❌ 签到失败 ({reason}) - {log_base_info}")
             await send_log_to_tg('❌ 失败', request_data.user_id, reason, client_ip, user_agent)
-            raise HTTPException(status_code=500, detail="签到处理失败，请重试")
+            raise HTTPException(status_code=500, detail="服务异常，请重试")
 
         verification_methods = ["Turnstile"]
-        if RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY:
-            verification_methods.append("reCAPTCHA")
+        if RECAPTCHA_V3_SITE_KEY and RECAPTCHA_V3_SECRET_KEY:
+            verification_methods.append(f"reCAPTCHAv3 - {recaptcha_v3_score:.2f}分")
         verification_info = " + ".join(verification_methods)
         
         success_reason = f"奖励: {reward} {sakura_b}, 余额: {new_balance} {sakura_b}, 验证: {verification_info}"

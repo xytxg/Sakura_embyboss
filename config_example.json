@@ -112,7 +112,7 @@
       "site_key": "",
       "secret_key": ""
     },
-    "google_recaptcha": {
+    "google_recaptcha_v3": {
       "site_key": "",
       "secret_key": ""
     },

@@ -7,8 +7,8 @@
     <title>每日签到</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
-    {% if recaptcha_site_key %}
-    <script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}" async defer></script>
+    {% if recaptcha_v3_site_key %}
+    <script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_v3_site_key }}" async defer></script>
     {% endif %}
     <script>
         (function() {
@@ -253,7 +253,7 @@
         let userId = null;
         let turnstileWidgetId = null;
         let pageLoadTime = Date.now();
-        let recaptchaSiteKey = '{{ recaptcha_site_key }}';
+        let recaptchaSiteKey = '{{ recaptcha_v3_site_key }}';
         let isRecaptchaEnabled = recaptchaSiteKey && recaptchaSiteKey.trim() !== '';
 
         let requestAttempts = 0;
@@ -458,11 +458,13 @@
                 if (isRecaptchaEnabled) {
                     const recaptchaToken = await getRecaptchaToken();
                     if (recaptchaToken) {
-                        requestData.recaptcha_token = recaptchaToken;
+                        requestData.recaptcha_v3_token = recaptchaToken;
                     } else {
-                        showError('reCAPTCHA 验证失败，请重试');
-                        this.disabled = false;
-                        this.textContent = '重新签到';
+                        
+                        showError('人机验证失败，请刷新页面重试');
+                        this.disabled = true; 
+                        this.textContent = '请重新打开页面';
+                        this.style.cursor = 'default';
                         return;
                     }
                 }
@@ -506,13 +508,13 @@
 
                     switch (response.status) {
                         case 429:
-                            errorMessage = data.detail || '操作过于频繁，请稍后再试';
+                            errorMessage = data.detail || '操作过于频繁，请稍后重试';
                             break;
                         case 401:
-                            errorMessage = '身份验证失败，请重新打开页面';
+                            errorMessage = '请求异常，请重试';
                             break;
                         case 403:
-                            errorMessage = '检测到异常，请稍后再试';
+                            errorMessage = '请求异常，请重试';
                             break;
                         case 409:
                             errorMessage = '您今天已经签到过了，再签到剁掉你的小鸡鸡🐤';
@@ -523,23 +525,21 @@
 
                     showError(errorMessage);
 
-                    if (response.status === 429 || response.status === 400 || response.status === 401 || response.status === 403) {
+                    if (response.status === 409) {
+                        this.disabled = true;
+                        this.textContent = '今日已签到';
+                        this.style.backgroundColor = 'var(--warning-text)';
+                        this.style.cursor = 'default';
+
+                    } else {
                         this.disabled = true;
                         this.textContent = '请重新打开页面';
                         this.style.cursor = 'default';
-                        if (tg.MainButton) {
-                            tg.MainButton.setText('请重新打开页面');
-                            tg.MainButton.show();
-                            tg.MainButton.disable();
-                        }
-                    } else if (response.status !== 409) {
-                        this.disabled = false;
-                        this.textContent = '重新签到';
                     }
                 }
             } catch (error) {
                 console.error('签到请求失败:', error);
-                showError('连接失败或服务器异常，请稍后重试');
+                showError('服务异常，请重试');
                 this.disabled = true;
                 this.textContent = '请重新打开页面';
             }

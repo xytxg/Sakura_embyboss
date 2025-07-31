@@ -119,7 +119,7 @@ class CloudflareTurnstile(BaseModel):
     site_key: Optional[str] = ""
     secret_key: Optional[str] = ""
 
-class GooglereCAPTCHA(BaseModel):
+class GooglereCAPTCHAv3(BaseModel):
     site_key: Optional[str] = ""
     secret_key: Optional[str] = ""
 
@@ -143,7 +143,7 @@ class API(BaseModel):
     singing_secret: Optional[str] = "dCQ9Su6Bez3pQCY6TPiz4Dx69sGWVyVtBBI7sZ3b1zCkqMAZhi"
     allow_origins: Optional[List[Union[str, int]]] = None
     cloudflare_turnstile: Optional[CloudflareTurnstile] = Field(default_factory=CloudflareTurnstile)
-    google_recaptcha: Optional[GooglereCAPTCHA] = Field(default_factory=GooglereCAPTCHA)
+    google_recaptcha_v3: Optional[GooglereCAPTCHAv3] = Field(default_factory=GooglereCAPTCHAv3)
     log_to_tg: Optional[LogToTG] = Field(default_factory=LogToTG)
     redis: Optional[RedisConfig] = Field(default_factory=RedisConfig)
 
