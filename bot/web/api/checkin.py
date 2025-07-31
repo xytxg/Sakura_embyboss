@@ -43,7 +43,7 @@ SIGNING_SECRET = config_api.singing_secret
 MAX_REQUEST_AGE = 5
 RATE_LIMIT_WINDOW = 3600
 MAX_REQUESTS_PER_HOUR = 3
-MAX_PAGE_LOAD_INTERVAL = 17
+MAX_PAGE_LOAD_INTERVAL = 18
 MIN_PAGE_LOAD_INTERVAL = 3
 MIN_USER_INRTEACTION = 3
 
@@ -276,7 +276,7 @@ async def verify_recaptcha_v3(token: str, client_ip: str) -> (bool, float, Optio
                 success = result.get("success", False)
                 score = result.get("score", 0.0)
                 
-                if success and score >= 0.3:
+                if success and score >= 0.7:
                     return True, score, None
                 else:
                     reason = f"reCAPTCHAv3验证失败: success={success}, score={score}"
@@ -284,7 +284,7 @@ async def verify_recaptcha_v3(token: str, client_ip: str) -> (bool, float, Optio
                     
     except aiohttp.ClientError as e:
         reason = f"reCAPTCHA v3验证网络错误: {e}"
-        LOGGER.error(reason )
+        LOGGER.error(reason)
         return False, -1.0, reason
     except Exception as e:
         reason = f"reCAPTCHA v3验证未知错误: {e}"
@@ -433,7 +433,7 @@ async def verify_checkin(
 
         verification_methods = ["Turnstile"]
         if RECAPTCHA_V3_SITE_KEY and RECAPTCHA_V3_SECRET_KEY:
-            verification_methods.append(f"reCAPTCHAv3 - {recaptcha_v3_score:.2f}分")
+            verification_methods.append(f"reCAPTCHAv3 - {recaptcha_v3_score:.1f}分")
         verification_info = " + ".join(verification_methods)
         
         success_reason = f"奖励: {reward} {sakura_b}, 余额: {new_balance} {sakura_b}, 验证: {verification_info}"
