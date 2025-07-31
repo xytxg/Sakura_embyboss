@@ -276,7 +276,7 @@ async def verify_recaptcha_v3(token: str, client_ip: str) -> (bool, float, Optio
                 success = result.get("success", False)
                 score = result.get("score", 0.0)
                 
-                if success and score >= 0.7:
+                if success and score >= 0.3:
                     return True, score, None
                 else:
                     reason = f"reCAPTCHAv3验证失败: success={success}, score={score}"
