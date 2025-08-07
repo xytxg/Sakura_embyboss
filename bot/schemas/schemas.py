@@ -146,6 +146,7 @@ class API(BaseModel):
     google_recaptcha_v3: Optional[GooglereCAPTCHAv3] = Field(default_factory=GooglereCAPTCHAv3)
     log_to_tg: Optional[LogToTG] = Field(default_factory=LogToTG)
     redis: Optional[RedisConfig] = Field(default_factory=RedisConfig)
+    emby_whitelist_line_host: List[str] = []
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -178,6 +179,7 @@ class Config(BaseModel):
     emby_url: str
     emby_block: Optional[List[str]] = []
     emby_line: str
+    emby_whitelist_line: Optional[str] = ""
     extra_emby_libs: Optional[List[str]] = []
     db_host: str
     db_user: str
@@ -204,8 +206,6 @@ class Config(BaseModel):
     fuxx_pitao: bool = True
     # 活跃检测天数，默认21天
     activity_check_days: int = 21
-    # 白名单用户专属的emby线路
-    emby_whitelist_line: Optional[str] = None
     # 被拦截的user-agent模式列表
     blocked_clients: Optional[List[str]] = None
     # 是否在检测到可疑客户端时终止会话

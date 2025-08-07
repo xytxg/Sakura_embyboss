@@ -11,7 +11,7 @@ import errno
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from .api import emby_api_route, user_api_route, checkin_api_route
+from .api import emby_api_route, user_api_route, checkin_api_route, auth_api_route
 from bot import api as config_api, LOGGER
 
 
@@ -37,6 +37,7 @@ class Web:
         self.app.include_router(emby_api_route)
         self.app.include_router(user_api_route)
         self.app.include_router(checkin_api_route)
+        self.app.include_router(auth_api_route)
         # 配字 CORS 的中间件
         self.app.add_middleware(
             CORSMiddleware,
@@ -57,7 +58,7 @@ class Web:
 
         self.init_api()
         self.web_api = uvicorn.Server(
-            config=uvicorn.Config(self.app, host=config_api.http_url, port=config_api.http_port)
+            config=uvicorn.Config(self.app, host=config_api.http_url, port=config_api.http_port, access_log=False)
         )
         server_config = self.web_api.config
         if not server_config.loaded:
