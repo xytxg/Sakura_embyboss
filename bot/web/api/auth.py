@@ -71,11 +71,10 @@ async def handle_auth_request(request: Request):
                 sql_update_emby(Emby.embyid == user_id, lv='c')
                 message = (
                     f"🚨 **自动封禁通知** 🚨\n\n"
-                    f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg})\n"
-                    f"🆔 ID: `{user_record.tg}`\n"
-                    f"⛔️ 状态: 已被自动封禁\n\n"
-                    f"📌 原因：使用了受限的服务器地址进行访问\n"
-                    f"‼️如有疑问，请联系管理员处理"
+                    f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg}) - `{user_record.tg}`\n"
+                    f"⛔️ 状态: 已自动封禁\n\n"
+                    f"📌 原因: 检测到非授权请求\n"
+                    f"‼️ 如有疑问，请联系管理员处理"
                 )
                 try:
                     sent_message = await bot.send_message(group[0], message, parse_mode=ParseMode.MARKDOWN)
@@ -86,8 +85,7 @@ async def handle_auth_request(request: Request):
                 LOGGER.error(f"通过 Emby API 封禁用户 {user_record.name} ({user_record.tg}) 失败！请手动处理。")
                 message = (
                     f"🔥 **封禁失败警告** 🔥\n\n"
-                    f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg})\n"
-                    f"🆔 ID: `{user_record.tg}`\n"
+                    f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg})\n - `{user_record.tg}`"
                     f"⛔️ 状态: 自动封禁失败！\n\n"
                     f"‼️ **请立即手动检查并封禁该用户！**"
                 )
