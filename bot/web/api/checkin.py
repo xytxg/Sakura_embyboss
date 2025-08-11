@@ -101,11 +101,15 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
             _TG_LOG_CONFIG_MISSING_WARNING_SHOWN = True
         return
 
+    user_name = "无法获取昵称"
+    tg_username = "无"
     try:
-        first = await bot.get_chat(user_id)
-        user_name = first.first_name
+        chat_info = await bot.get_chat(user_id)
+        user_name = chat_info.first_name
+        if chat_info.username:
+            tg_username = chat_info.username
     except Exception as e:
-        user_name = "无法获取昵称"
+        LOGGER.error(f"通过 user_id {user_id} 获取TG信息失败: {e}")
 
     now_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
     text = (
@@ -115,7 +119,8 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
         f"🌍 *用户 IP:* `{ip}`\n"
         f"👤 *TG 信息:*\n"
         f"   - *昵称:* `{user_name}` (`{user_id}`)\n"
-        f"   - *链接:* tg://user?id={user_id}\n"
+        f"   - *用户名:* `{tg_username}`\n"
+        f"   - *深链接:* tg://user?id={user_id}\n"
         f"```UserAgent\n{ua}```"
     )
     if reason:

@@ -62,10 +62,13 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
         emby_username = user_record.name
 
     if user_record and user_record.tg:
-        tg_display_name = emby_username 
+        tg_display_name = emby_username
+        tg_username = "无"
         try:
             chat_info = await bot.get_chat(user_record.tg)
             tg_display_name = chat_info.first_name
+            if chat_info.username:
+                tg_username = chat_info.username
         except PeerIdInvalid:
             LOGGER.warning(f"无法获取TG用户信息：无效的 Peer ID {user_record.tg}")
         except Exception as e:
@@ -73,7 +76,11 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
             tg_display_name = "无法获取昵称"
 
         safe_display_name = str(tg_display_name).replace('[', '').replace(']', '')
-        tg_info_str = f"   - **昵称:** `{safe_display_name}` (`{user_record.tg}`)\n   - **链接:** tg://user?id={user_record.tg}"
+        tg_info_str = (
+            f"   - **昵称:** `{safe_display_name}` (`{user_record.tg}`)\n"
+            f"   - **用户名:** `{tg_username}`\n"
+            f"   - **深链接:** tg://user?id={user_record.tg}"
+        )
         return tg_info_str, emby_username
         
     elif user_record:
@@ -95,8 +102,8 @@ def build_login_message(date, tg_info_str, emby_username, user_id, session_data,
     return (
         f"**🔐 用户登录通知**\n\n"
         f"👤 **用户名称:** `{emby_username}`{user_level_str}\n"
-        f"🆔 **用户 ID:** `{user_id}`\n"
-        f"🕒 **时间:** `{date}`\n\n"
+        f"🕒 **时间:** `{date}`\n"
+        f"🆔 **用户 ID:** `{user_id}`\n\n"
         f"📱 **TG 信息:**\n{tg_info_str}\n\n"
         f"💻 **设备信息:**\n"
         f"   - **设备名称:** `{device_name}`\n"
@@ -130,9 +137,9 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
     return (
         f"**📺 用户播放通知**\n\n"
         f"👤 **用户名称:** `{emby_username}`{user_level_str}\n"
+        f"🕒 **时间:** `{date}`\n"
         f"🆔 **用户 ID:** `{user_id}`\n\n"
-        f"🕒 **时间:** `{date}`\n\n"
-        f"📱 **TG 信息:**\n{tg_info_str}\n"
+        f"📱 **TG 信息:**\n{tg_info_str}\n\n"
         f"🎬 **播放内容:**\n"
         f"   - **名称:** `{series_name} - {episode_name}`\n"
         f"   - **类型:** `{media_type}`\n"
