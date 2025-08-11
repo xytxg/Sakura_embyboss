@@ -89,7 +89,7 @@ def build_login_message(date, tg_info_str, emby_username, user_id, session_data,
 
     return (
         f"**🔐 用户登录通知**\n\n"
-        f"👤 **Emby 用户:** `{emby_username}`\n - `{user_level_str}`"
+        f"👤 **Emby 用户:** `{emby_username}` - `{user_level_str}`\n"
         f"🆔 **用户 ID:** `{user_id}`\n"
         f"📱 **TG 账户:** {tg_info_str}\n"
         f"🕒 **时间:** `{date}`\n\n"
