@@ -3,6 +3,7 @@
 """
 event.py - Emby Webhook 事件处理
 """
+import re
 import time
 import pytz
 import aiohttp
@@ -32,17 +33,21 @@ EVENT_PLAYBACK_PAUSE = 'playback.pause'
 EVENT_SESSION_ENDED = 'playback.sessionended'
 
 # --- 工具函数 ---
-
 def convert_utc_to_beijing(utc_str: str) -> str:
     try:
+        match = re.search(r"(\.\d{6})\d*Z?$", utc_str)
+        if match:
+            utc_str = utc_str[:match.start(1)] + match.group(1) + "Z"
+
         utc_time = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
         return utc_time.astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
+    except Exception as e:
+        LOGGER.error(f"时间转换失败: {e}, 原始字符串: '{utc_str}'")
         return "未知时间"
 
 def format_user_level(user_record) -> str:
     if not user_record or not hasattr(user_record, 'lv'):
-        return "未入库"
+        return "无数据"
     
     level_map = {
         'a': "白名单",
@@ -62,7 +67,7 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
             chat_info = await bot.get_chat(user_record.tg)
             tg_display_name = chat_info.username if chat_info.username else chat_info.first_name
         except PeerIdInvalid:
-            LOGGER.warning(f"无法获取TG用户信息：无效的 Peer ID {user_record.tg}。")
+            LOGGER.warning(f"无法获取TG用户信息：无效的 Peer ID {user_record.tg}")
         except Exception as e:
             LOGGER.error(f"获取TG用户信息时发生未知错误 (ID: {user_record.tg}): {e}")
             tg_display_name = "无法获取昵称"
@@ -72,10 +77,10 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
         return tg_info_str, emby_username
         
     elif user_record:
-        tg_info_str = f"`{emby_username}` (TG未绑定)"
+        tg_info_str = f"`{emby_username}` - 未绑定"
         return tg_info_str, emby_username
     
-    tg_info_str = f"`{emby_username}` (用户未入库)"
+    tg_info_str = f"`{emby_username}` - 无数据"
     return tg_info_str, emby_username
 
 # --- 消息构建函数 ---
@@ -150,7 +155,7 @@ async def send_telegram_message(text: str, thread_id: str = None, session_id: st
     payload = {'chat_id': TG_LOG_CHAT_ID, 'text': text, 'parse_mode': ParseMode.MARKDOWN.value}
     if thread_id: payload['message_thread_id'] = thread_id
     try:
-        async with aiohttp.ClientSession(  ) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as response:
                 if response.status == 200:
                     resp_json = await response.json()
@@ -165,12 +170,12 @@ async def send_telegram_message(text: str, thread_id: str = None, session_id: st
 async def send_playback_stop_reply(session_id: str, user_name: str):
     cache_entry = play_session_cache.pop(session_id, None)
     if not cache_entry: return
-    stop_msg = f"🛑 用户 `{user_name}` 的播放已结束。"
+    stop_msg = f"🛑 用户 `{user_name}` 的播放已结束"
     url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': cache_entry['chat_id'], 'text': stop_msg, 'reply_to_message_id': cache_entry['message_id']}
     if cache_entry['thread_id']: payload['message_thread_id'] = cache_entry['thread_id']
     try:
-        async with aiohttp.ClientSession(  ) as session: await session.post(url, json=payload, timeout=10)
+        async with aiohttp.ClientSession() as session: await session.post(url, json=payload, timeout=10)
     except Exception as e: LOGGER.error(f"发送播放停止回复失败: {e}")
 
 # --- Webhook 主路由 ---
