@@ -77,10 +77,10 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
         return tg_info_str, emby_username
         
     elif user_record:
-        tg_info_str = f"`{emby_username}` - 未绑定"
+        tg_info_str = f"`{emby_username}` - `未绑定`"
         return tg_info_str, emby_username
     
-    tg_info_str = f"`{emby_username}` - 无数据"
+    tg_info_str = f"`{emby_username}` - `无数据`"
     return tg_info_str, emby_username
 
 # --- 消息构建函数 ---
@@ -191,7 +191,7 @@ async def webhook(request: Request):
     user_name_from_webhook = user_data.get('Name', '未知用户')
     emby_user_id = user_data.get('Id')
 
-    if not emby_user_id or user_name_from_webhook.lower() in IGNORED_USERS_SET:
+    if not emby_user_id or user_name_from_webhook in IGNORED_USERS_SET:
         return Response(status_code=204)
 
     user_record = sql_get_emby(emby_user_id)
