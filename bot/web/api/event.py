@@ -23,7 +23,7 @@ TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
 TG_LOG_CHAT_ID = config_api.log_to_tg.chat_id
 TG_LOGIN_THREAD_ID = config_api.log_to_tg.login_thread_id
 TG_PLAY_THREAD_ID = config_api.log_to_tg.play_thread_id
-IGNORED_USERS_SET = {user.strip().lower() for user in getattr(config_api, 'emby_webhook', {}).get('ignore_users', [])}
+IGNORED_USERS_SET = config_api.log_to_tg.ignore_users
 
 # --- 事件常量 ---
 EVENT_USER_AUTHENTICATED = 'user.authenticated'
