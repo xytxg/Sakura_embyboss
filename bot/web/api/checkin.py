@@ -103,7 +103,7 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
 
     try:
         first = await bot.get_chat(user_id)
-        user_name = first.first_name if not first.username else first.username
+        user_name = first.first_name
     except Exception as e:
         user_name = "无法获取昵称"
 
@@ -112,8 +112,10 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
         f"#用户签到通知\n\n"
         f"📅 *签到结果:* {log_type}\n"
         f"🕒 *签到时间:* `{now_str}`\n"
-        f"👤 *签到用户:* [{user_name}](tg://user?id={user_id}) - `{user_id}`\n"
         f"🌍 *用户 IP:* `{ip}`\n"
+        f"👤 *TG 信息:*\n"
+        f"   - *昵称:* `{user_name}` (`{user_id}`)\n"
+        f"   - *链接:* tg://user?id={user_id}\n"
         f"```UserAgent\n{ua}```"
     )
     if reason:

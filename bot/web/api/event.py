@@ -47,14 +47,14 @@ def convert_utc_to_beijing(utc_str: str) -> str:
 
 def format_user_level(user_record) -> str:
     if not user_record or not hasattr(user_record, 'lv'):
-        return "无数据"
+        return ""
     
     level_map = {
-        'a': "白名单",
-        'b': "普通用户",
-        'c': "已封禁"
+        'a': " (白名单)",
+        'b': " (普通用户)",
+        'c': " (已封禁)"
     }
-    return level_map.get(user_record.lv, "未知等级")
+    return level_map.get(user_record.lv, " (未知等级)")
 
 async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[str, str]:
     emby_username = fallback_name
@@ -65,7 +65,7 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
         tg_display_name = emby_username 
         try:
             chat_info = await bot.get_chat(user_record.tg)
-            tg_display_name = chat_info.username if chat_info.username else chat_info.first_name
+            tg_display_name = chat_info.first_name
         except PeerIdInvalid:
             LOGGER.warning(f"无法获取TG用户信息：无效的 Peer ID {user_record.tg}")
         except Exception as e:
@@ -73,31 +73,31 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
             tg_display_name = "无法获取昵称"
 
         safe_display_name = str(tg_display_name).replace('[', '').replace(']', '')
-        tg_info_str = f"[{safe_display_name}](tg://user?id={user_record.tg}) - `{user_record.tg}`"
+        tg_info_str = f"   - **昵称:** `{safe_display_name}` (`{user_record.tg}`)\n   - **链接:** tg://user?id={user_record.tg}"
         return tg_info_str, emby_username
         
     elif user_record:
-        tg_info_str = f"`{emby_username}` - `未绑定`"
+        tg_info_str = f"   - **未绑定**"
         return tg_info_str, emby_username
     
-    tg_info_str = f"`{emby_username}` - `无数据`"
+    tg_info_str = f"   - **无数据**"
     return tg_info_str, emby_username
 
 # --- 消息构建函数 ---
 
 def build_login_message(date, tg_info_str, emby_username, user_id, session_data, login_host, user_level_str):
-    client_name = session_data.get('Client', '未知')
-    client_version = session_data.get('ApplicationVersion', '未知')
-    device_name = session_data.get('DeviceName', '未知')
-    device_id = session_data.get('DeviceId', '未知设备ID')
-    remote_ip = session_data.get('RemoteEndPoint', '未知')
+    client_name = session_data.get('Client', '无数据')
+    client_version = session_data.get('ApplicationVersion', '无数据')
+    device_name = session_data.get('DeviceName', '无数据')
+    device_id = session_data.get('DeviceId', '无数据')
+    remote_ip = session_data.get('RemoteEndPoint', '无数据')
 
     return (
         f"**🔐 用户登录通知**\n\n"
-        f"👤 **Emby 用户:** `{emby_username}` - `{user_level_str}`\n"
+        f"👤 **用户名称:** `{emby_username}`{user_level_str}\n"
         f"🆔 **用户 ID:** `{user_id}`\n"
-        f"📱 **TG 账户:** {tg_info_str}\n"
         f"🕒 **时间:** `{date}`\n\n"
+        f"📱 **TG 信息:**\n{tg_info_str}\n\n"
         f"💻 **设备信息:**\n"
         f"   - **设备名称:** `{device_name}`\n"
         f"   - **客户端:** `{client_name} ({client_version})`\n"
@@ -109,8 +109,8 @@ def build_login_message(date, tg_info_str, emby_username, user_id, session_data,
 
 def build_playback_message(date, tg_info_str, emby_username, user_id, item_data, session_data, login_host, user_level_str):
     series_name = item_data.get('SeriesName', '电影')
-    episode_name = item_data.get('Name', '未知')
-    media_type = item_data.get('Type', '未知类型')
+    episode_name = item_data.get('Name', '无数据')
+    media_type = item_data.get('Type', '无数据')
     
     runtime_ticks = item_data.get('RunTimeTicks', 0)
     runtime_minutes = round(runtime_ticks / 10**7 / 60, 1) if runtime_ticks else 0
@@ -121,18 +121,18 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
     bitrate_bps = item_data.get('Bitrate', 0)
     bitrate_kbps = round(bitrate_bps / 1000) if bitrate_bps else 0
     
-    client_name = session_data.get('Client', '未知')
-    client_version = session_data.get('ApplicationVersion', '未知')
-    device_name = session_data.get('DeviceName', '未知')
-    device_id = session_data.get('DeviceId', '未知设备ID')
-    remote_ip = session_data.get('RemoteEndPoint', '未知')
+    client_name = session_data.get('Client', '无数据')
+    client_version = session_data.get('ApplicationVersion', '无数据')
+    device_name = session_data.get('DeviceName', '无数据')
+    device_id = session_data.get('DeviceId', '无数据')
+    remote_ip = session_data.get('RemoteEndPoint', '无数据')
 
     return (
         f"**📺 用户播放通知**\n\n"
-        f"👤 **Emby 用户:** `{emby_username}` - `{user_level_str}`\n"
-        f"🆔 **用户 ID:** `{user_id}`\n"
-        f"📱 **TG 账户:** {tg_info_str}\n"
+        f"👤 **用户名称:** `{emby_username}`{user_level_str}\n"
+        f"🆔 **用户 ID:** `{user_id}`\n\n"
         f"🕒 **时间:** `{date}`\n\n"
+        f"📱 **TG 信息:**\n{tg_info_str}\n"
         f"🎬 **播放内容:**\n"
         f"   - **名称:** `{series_name} - {episode_name}`\n"
         f"   - **类型:** `{media_type}`\n"
@@ -202,15 +202,16 @@ async def webhook(request: Request):
     date = convert_utc_to_beijing(data.get('Date', ''))
     session_data = data.get('Session', {})
     session_id = session_data.get('Id')
-    device_id = session_data.get('DeviceId', '未知设备ID')
+    device_id = session_data.get('DeviceId', '无数据')
     
-    login_host = host_cache.get(device_id, {}).get('host', '未知')
-    if login_host == '未知':
-        login_host = host_cache.get(emby_user_id, {}).get('host', '未知')
+    login_host = host_cache.get(device_id, {}).get('host', '无数据')
+    if login_host == '无数据':
+        login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
 
 
     # --- 事件处理分发 ---
     if event == EVENT_USER_AUTHENTICATED:
+        time.sleep(2)
         message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str)
         await send_telegram_message(message_text, thread_id=TG_LOGIN_THREAD_ID)
 
