@@ -9,7 +9,7 @@ from bot.func_helper.emby import emby
 from pyrogram.enums import ParseMode
 from fastapi import APIRouter, Request, Response
 from bot.func_helper.shared_cache import host_cache
-from bot import LOGGER, group, bot, api as config_api
+from bot import LOGGER, group, bot, owner, api as config_api
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
 route = APIRouter()
@@ -65,14 +65,30 @@ async def handle_auth_request(request: Request):
 
     if user_level == 'b':
         if request_host and request_host in EMBY_WHITE_LIST_HOSTS:
-            LOGGER.warning(f"用户 {user_record.name} ({user_record.tg}) 使用了封禁 Host '{request_host}'，触发封禁逻辑！")
+            LOGGER.warning(f"🚨 用户 {user_record.name} ({user_record.tg}) 使用了封禁 Host '{request_host}'，触发封禁逻辑！")
             auth_cache[cache_key] = {'timestamp': current_time, 'allowed': False}
             
             ban_success = await emby.emby_change_policy(id=user_id, method=True)
 
+            owner_message_content = (
+                f"👤 **用户**: [{user_record.name}](tg://user?id={user_record.tg}) - `{user_record.tg}`\n"
+                f"📌 **违规 Host**: `{request_host}`\n"
+            )
+
             if ban_success:
                 sql_update_emby(Emby.embyid == user_id, lv='c')
-                message = (
+                
+                owner_message = (
+                    f"✅ **自动封禁通知** ✅\n\n"
+                    f"{owner_message_content}"
+                    f"ℹ️ **状态**: 已自动封禁"
+                )
+                try:
+                    await bot.send_message(owner, owner_message, parse_mode=ParseMode.MARKDOWN)
+                except Exception as e:
+                    LOGGER.error(f"向 Owner 发送封禁成功通知失败: {e}")
+
+                group_message = (
                     f"🚨 **自动封禁通知** 🚨\n\n"
                     f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg}) - `{user_record.tg}`\n"
                     f"⛔️ 状态: 已自动封禁\n\n"
@@ -80,19 +96,30 @@ async def handle_auth_request(request: Request):
                     f"‼️ 如有疑问，请联系管理员处理"
                 )
                 try:
-                    sent_message = await bot.send_message(group[0], message, parse_mode=ParseMode.MARKDOWN)
+                    sent_message = await bot.send_message(group[0], group_message, parse_mode=ParseMode.MARKDOWN)
                     await sent_message.forward(user_record.tg)
                 except Exception as e:
-                    LOGGER.error(f"发送 Telegram 封禁通知失败: {e}")
+                    LOGGER.error(f"发送 Telegram 封禁通知到群组或用户失败: {e}")
             else:
-                LOGGER.error(f"通过 Emby API 封禁用户 {user_record.name} ({user_record.tg}) 失败！请手动处理。")
-                message = (
+                LOGGER.error(f"通过 Emby API 封禁用户 {user_record.name} ({user_record.tg}) 失败！请手动处理")
+                
+                owner_message = (
+                    f"🔥 **封禁失败警告** 🔥\n\n"
+                    f"{owner_message_content}"
+                    f"‼️ **处置**: API调用失败，**请立即手动封禁该用户！**"
+                )
+                try:
+                    await bot.send_message(owner, owner_message, parse_mode=ParseMode.MARKDOWN)
+                except Exception as e:
+                    LOGGER.error(f"向 Owner 发送封禁失败通知失败: {e}")
+
+                group_message = (
                     f"🔥 **封禁失败警告** 🔥\n\n"
                     f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg}) - `{user_record.tg}`\n"
                     f"⛔️ 状态: 自动封禁失败！\n\n"
                     f"‼️ **请立即手动检查并封禁该用户！**"
                 )
-                await bot.send_message(group[0], message, parse_mode=ParseMode.MARKDOWN)
+                await bot.send_message(group[0], group_message, parse_mode=ParseMode.MARKDOWN)
             
             return Response(content="False", status_code=401, media_type="text/plain")
         else:
