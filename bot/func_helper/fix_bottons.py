@@ -45,7 +45,7 @@ def judge_start_ikb(is_admin: bool, account: bool) -> InlineKeyboardMarkup:
     if _open.checkin:
         try:
             if config_api.webapp_url and config_api.webapp_url.strip() != "":
-                checkin_url = config_api.webapp_url.rstrip('/') + "/api/checkin/web"
+                checkin_url = config_api.webapp_url.rstrip('/') + "/checkin/web"
                 webapp_button = InlineKeyboardButton("🎯 签到", web_app=WebAppInfo(url=checkin_url))
                 buttons.append([webapp_button])
             else:

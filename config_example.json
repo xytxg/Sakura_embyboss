@@ -118,7 +118,10 @@
     "log_to_tg": {
       "bot_token": "",
       "chat_id": "",
-      "thread_id": ""
+      "checkin_thread_id": "",
+      "login_thread_id": "",
+      "play_thread_id": "",
+      "ignore_users": []
     },
     "redis": {
       "host": "localhost",

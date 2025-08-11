@@ -27,7 +27,7 @@ from bot import _open, bot_token, LOGGER, api as config_api, sakura_b
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
 # ==================== 路由与模板设置 ====================
-route = APIRouter(prefix="/checkin")
+route = APIRouter()
 templates_path = Path(__file__).parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_path))
 
@@ -55,7 +55,7 @@ DECODE_RESPONSES = config_api.redis.decode_responses
 
 TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
 TG_LOG_CHAT_ID = config_api.log_to_tg.chat_id
-TG_LOG_THREAD_ID = config_api.log_to_tg.thread_id
+TG_LOG_CHECKIN_THREAD_ID = config_api.log_to_tg.checkin_thread_id
 _TG_LOG_CONFIG_MISSING_WARNING_SHOWN = False
 
 redis_client = None
@@ -125,8 +125,8 @@ async def send_log_to_tg(log_type: str, user_id: int, reason: str = "", ip: str 
         'text': text,
         'parse_mode': 'Markdown'
     }
-    if TG_LOG_THREAD_ID:
-        payload['message_thread_id'] = TG_LOG_THREAD_ID
+    if TG_LOG_CHECKIN_THREAD_ID:
+        payload['message_thread_id'] = TG_LOG_CHECKIN_THREAD_ID
 
     try:
         async with aiohttp.ClientSession() as session:

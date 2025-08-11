@@ -5,22 +5,19 @@ auth.py - Emby 线路鉴权网关
 """
 import re
 import time
-from bot import LOGGER, group, bot
 from bot.func_helper.emby import emby
 from pyrogram.enums import ParseMode
 from fastapi import APIRouter, Request, Response
-from bot import _open, bot_token, LOGGER, api as config_api, sakura_b
+from bot.func_helper.shared_cache import host_cache
+from bot import LOGGER, group, bot, api as config_api
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
 route = APIRouter()
 
 # --- 应用配置 ---
 EMBY_WHITE_LIST_HOSTS = config_api.emby_whitelist_line_host
-
 AUTH_COOLDOWN_SECONDS = 300
-
 auth_cache = {}
-
 
 # --- 统一请求处理路由 ---
 @route.api_route("/{path:path}", methods=["GET", "POST", "HEAD", "OPTIONS"])
@@ -34,6 +31,14 @@ async def handle_auth_request(request: Request):
 
     user_id_match = re.search(r'Users/([a-fA-F0-9]{32})', full_path, re.IGNORECASE)
 
+    if user_id_match and request_host:
+        emby_user_id = user_id_match.group(1)
+        
+        host_cache[emby_user_id] = {
+            'host': request_host,
+            'timestamp': time.time()
+        }
+
     if not user_id_match:
         return Response(content="True", status_code=200, media_type="text/plain")
 
@@ -44,10 +49,8 @@ async def handle_auth_request(request: Request):
     cached_auth = auth_cache.get(cache_key)
 
     if cached_auth and (current_time - cached_auth['timestamp'] < AUTH_COOLDOWN_SECONDS):
-        if cached_auth['allowed']:
-            return Response(content="True", status_code=200, media_type="text/plain")
-        else:
-            return Response(content="False", status_code=401, media_type="text/plain")
+        return Response(content="True" if cached_auth['allowed'] else "False", 
+                        status_code=200 if cached_auth['allowed'] else 401,                         media_type="text/plain")
     
     user_record = sql_get_emby(user_id)
 
@@ -80,12 +83,12 @@ async def handle_auth_request(request: Request):
                     sent_message = await bot.send_message(group[0], message, parse_mode=ParseMode.MARKDOWN)
                     await sent_message.forward(user_record.tg)
                 except Exception as e:
-                    LOGGER.error(f"发送 Telegram 通知失败: {e}")
+                    LOGGER.error(f"发送 Telegram 封禁通知失败: {e}")
             else:
                 LOGGER.error(f"通过 Emby API 封禁用户 {user_record.name} ({user_record.tg}) 失败！请手动处理。")
                 message = (
                     f"🔥 **封禁失败警告** 🔥\n\n"
-                    f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg})\n - `{user_record.tg}`"
+                    f"👤 用户: [{user_record.name}](tg://user?id={user_record.tg}) - `{user_record.tg}`\n"
                     f"⛔️ 状态: 自动封禁失败！\n\n"
                     f"‼️ **请立即手动检查并封禁该用户！**"
                 )

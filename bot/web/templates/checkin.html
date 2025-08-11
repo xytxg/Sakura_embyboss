@@ -474,7 +474,7 @@
                     requestData.message_id = parseInt(userInfo.message_id);
                 }
 
-                const response = await fetch('/api/checkin/verify', {
+                const response = await fetch('/checkin/verify', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

@@ -126,7 +126,10 @@ class GooglereCAPTCHAv3(BaseModel):
 class LogToTG(BaseModel):
     bot_token: Optional[str] = ""
     chat_id: Optional[str] = ""
-    thread_id: Optional[str] = ""
+    checkin_thread_id: Optional[str] = ""
+    login_thread_id: Optional[str] = ""
+    play_thread_id: Optional[str] = ""
+    ignore_users: Optional[List[str]] = []
 
 class RedisConfig(BaseModel):
     host: Optional[str] = "localhost"
