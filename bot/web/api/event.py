@@ -7,6 +7,7 @@ import re
 import time
 import pytz
 import aiohttp
+import asyncio
 from typing import Tuple
 from datetime import datetime
 from pyrogram.enums import ParseMode
@@ -16,7 +17,7 @@ from bot.sql_helper.sql_emby import sql_get_emby
 from fastapi import APIRouter, Request, Response, HTTPException
 from bot.func_helper.shared_cache import host_cache, play_session_cache, PLAY_SESSION_MAX_SIZE
 
-route = APIRouter(  )
+route = APIRouter()
 
 # --- 配置加载 ---
 TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
@@ -210,19 +211,23 @@ async def webhook(request: Request):
     session_data = data.get('Session', {})
     session_id = session_data.get('Id')
     device_id = session_data.get('DeviceId', '无数据')
-    
-    login_host = host_cache.get(device_id, {}).get('host', '无数据')
-    if login_host == '无数据':
-        login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
-
 
     # --- 事件处理分发 ---
     if event == EVENT_USER_AUTHENTICATED:
-        time.sleep(2)
+        await asyncio.sleep(2)
+        
+        login_host = host_cache.get(device_id, {}).get('host', '无数据')
+        if login_host == '无数据':
+            login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
+
         message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str)
         await send_telegram_message(message_text, thread_id=TG_LOGIN_THREAD_ID)
 
     elif event == EVENT_PLAYBACK_START:
+        login_host = host_cache.get(device_id, {}).get('host', '无数据')
+        if login_host == '无数据':
+            login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
+            
         item_data = data.get('Item', {})
         message_text = build_playback_message(date, tg_info_str, emby_username, emby_user_id, item_data, session_data, login_host, user_level_str)
         await send_telegram_message(message_text, thread_id=TG_PLAY_THREAD_ID, session_id=session_id, user_name=emby_username)
