@@ -18,7 +18,7 @@ route = APIRouter()
 # --- 应用配置 ---
 TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
 TG_LOG_CHAT_ID = config_api.log_to_tg.chat_id
-TG_LOGIN_THREAD_ID = getattr(config_api.log_to_tg, 'login_thread_id', None)
+TG_LOGIN_THREAD_ID = config_api.log_to_tg.login_thread_id
 EMBY_WHITE_LIST_HOSTS = config_api.emby_whitelist_line_host
 AUTH_COOLDOWN_SECONDS = 300
 auth_cache = {}
