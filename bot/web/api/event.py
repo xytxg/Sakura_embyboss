@@ -18,7 +18,6 @@ from fastapi import APIRouter, Request, Response, HTTPException
 from bot.func_helper.shared_cache import host_cache, play_session_cache, PLAY_SESSION_MAX_SIZE
 
 route = APIRouter()
-aiohttp_session = aiohttp.ClientSession()
 
 # --- 配置加载 ---
 TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
@@ -169,33 +168,43 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
 async def send_telegram_message(text: str, thread_id: str = None, session_id: str = None, user_name: str = None):
     if not TG_LOG_BOT_TOKEN or not TG_LOG_CHAT_ID:
         return
-    
+
     url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TG_LOG_CHAT_ID, 'text': text, 'parse_mode': ParseMode.MARKDOWN.value}
     if thread_id:
         payload['message_thread_id'] = thread_id
 
-    for _ in range(5):
+    max_attempts = 5
+    delay = 1
+
+    for attempt in range(max_attempts):
         try:
-            async with aiohttp_session.post(url, json=payload, timeout=10) as response:
-                if response.status == 200:
-                    resp_json = await response.json()
-                    if resp_json.get('ok') and session_id:
-                        message_id = resp_json.get('result').get('message_id')
-                        play_session_cache[session_id] = {
-                            'message_id': message_id,
-                            'chat_id': TG_LOG_CHAT_ID,
-                            'thread_id': thread_id,
-                            'user_name': user_name,
-                            'timestamp': time.time()
-                        }
-                    return
-                else:
-                    LOGGER.error(f"发送TG日志失败: {response.status} - {await response.text()}")
-                    return
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=10) as response:
+                    if response.status == 200:
+                        resp_json = await response.json()
+                        if resp_json.get('ok') and session_id:
+                            message_id = resp_json.get('result', {}).get('message_id')
+                            if message_id:
+                                play_session_cache[session_id] = {
+                                    'message_id': message_id,
+                                    'chat_id': TG_LOG_CHAT_ID,
+                                    'thread_id': thread_id,
+                                    'user_name': user_name,
+                                    'timestamp': time.time()
+                                }
+                                if len(play_session_cache) > PLAY_SESSION_MAX_SIZE:
+                                    play_session_cache.popitem(last=False)
+                        return
+                    else:
+                        raise Exception(f"HTTP {response.status} - {await response.text()}")
         except Exception as e:
-            LOGGER.error(f"发送TG日志时发生网络错误: {e}")
-            await asyncio.sleep(1)
+            LOGGER.error(f"尝试 {attempt+1}/{max_attempts} 发送TG日志失败: {e}")
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(delay + 0.1 * attempt)
+                delay *= 2
+            else:
+                LOGGER.error(f"发送TG日志失败，达到最大重试次数 ({max_attempts})")
 
 async def send_playback_stop_reply(session_id: str, user_name: str):
     cache_entry = play_session_cache.pop(session_id, None)
