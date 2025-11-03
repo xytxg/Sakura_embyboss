@@ -18,6 +18,7 @@ from fastapi import APIRouter, Request, Response, HTTPException
 from bot.func_helper.shared_cache import host_cache, play_session_cache, PLAY_SESSION_MAX_SIZE
 
 route = APIRouter()
+aiohttp_session = aiohttp.ClientSession()
 
 # --- 配置加载 ---
 TG_LOG_BOT_TOKEN = config_api.log_to_tg.bot_token
@@ -57,6 +58,11 @@ def format_user_level(user_record) -> str:
     }
     return level_map.get(user_record.lv, " (未知等级)")
 
+def format_user_expiry(user_record) -> str:
+    if not user_record or not hasattr(user_record, 'ex') or user_record.ex is None:
+        return "无数据"
+    return str(user_record.ex)
+
 async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[str, str]:
     emby_username = fallback_name
     if user_record:
@@ -64,7 +70,7 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
 
     if user_record and user_record.tg:
         tg_display_name = emby_username
-        tg_username = "无"
+        tg_username = "无数据"
         try:
             chat_info = await bot.get_chat(user_record.tg)
             tg_display_name = chat_info.first_name
@@ -93,7 +99,7 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
 
 # --- 消息构建函数 ---
 
-def build_login_message(date, tg_info_str, emby_username, user_id, session_data, login_host, user_level_str):
+def build_login_message(date, tg_info_str, emby_username, user_id, session_data, login_host, user_level_str, user_expiry_str):
     client_name = session_data.get('Client', '无数据')
     client_version = session_data.get('ApplicationVersion', '无数据')
     device_name = session_data.get('DeviceName', '无数据')
@@ -103,7 +109,8 @@ def build_login_message(date, tg_info_str, emby_username, user_id, session_data,
     return (
         f"**🔐 用户登录通知**\n\n"
         f"👤 **用户名称:** `{emby_username}`{user_level_str}\n"
-        f"🕒 **时间:** `{date}`\n"
+        f"🗓 **到期时间:** `{user_expiry_str}`\n"
+        f"🕒 **登录时间:** `{date}`\n"
         f"🆔 **用户 ID:** `{user_id}`\n\n"
         f"📱 **TG 信息:**\n{tg_info_str}\n\n"
         f"💻 **设备信息:**\n"
@@ -115,7 +122,8 @@ def build_login_message(date, tg_info_str, emby_username, user_id, session_data,
         f"   - **登录线路:** `{login_host}`"
     )
 
-def build_playback_message(date, tg_info_str, emby_username, user_id, item_data, session_data, login_host, user_level_str):
+
+def build_playback_message(date, tg_info_str, emby_username, user_id, item_data, session_data, login_host, user_level_str, user_expiry_str):
     series_name = item_data.get('SeriesName', '电影')
     episode_name = item_data.get('Name', '无数据')
     media_type = item_data.get('Type', '无数据')
@@ -138,7 +146,8 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
     return (
         f"**📺 用户播放通知**\n\n"
         f"👤 **用户名称:** `{emby_username}`{user_level_str}\n"
-        f"🕒 **时间:** `{date}`\n"
+        f"🗓 **到期时间:** `{user_expiry_str}`\n"
+        f"🕒 **播放时间:** `{date}`\n"
         f"🆔 **用户 ID:** `{user_id}`\n\n"
         f"📱 **TG 信息:**\n{tg_info_str}\n\n"
         f"🎬 **播放内容:**\n"
@@ -158,22 +167,35 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
 
 # --- Telegram 交互 ---
 async def send_telegram_message(text: str, thread_id: str = None, session_id: str = None, user_name: str = None):
-    if not TG_LOG_BOT_TOKEN or not TG_LOG_CHAT_ID: return
+    if not TG_LOG_BOT_TOKEN or not TG_LOG_CHAT_ID:
+        return
+    
     url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TG_LOG_CHAT_ID, 'text': text, 'parse_mode': ParseMode.MARKDOWN.value}
-    if thread_id: payload['message_thread_id'] = thread_id
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=10) as response:
+    if thread_id:
+        payload['message_thread_id'] = thread_id
+
+    for _ in range(5):
+        try:
+            async with aiohttp_session.post(url, json=payload, timeout=10) as response:
                 if response.status == 200:
                     resp_json = await response.json()
                     if resp_json.get('ok') and session_id:
-                        message_id = resp_json.get('result', {}).get('message_id')
-                        if message_id:
-                            play_session_cache[session_id] = {'message_id': message_id, 'chat_id': TG_LOG_CHAT_ID, 'thread_id': thread_id, 'user_name': user_name, 'timestamp': time.time()}
-                            if len(play_session_cache) > PLAY_SESSION_MAX_SIZE: play_session_cache.popitem(last=False)
-                else: LOGGER.error(f"发送TG日志失败: {response.status} - {await response.text()}")
-    except Exception as e: LOGGER.error(f"发送TG日志时发生网络错误: {e}")
+                        message_id = resp_json.get('result').get('message_id')
+                        play_session_cache[session_id] = {
+                            'message_id': message_id,
+                            'chat_id': TG_LOG_CHAT_ID,
+                            'thread_id': thread_id,
+                            'user_name': user_name,
+                            'timestamp': time.time()
+                        }
+                    return
+                else:
+                    LOGGER.error(f"发送TG日志失败: {response.status} - {await response.text()}")
+                    return
+        except Exception as e:
+            LOGGER.error(f"发送TG日志时发生网络错误: {e}")
+            await asyncio.sleep(1)
 
 async def send_playback_stop_reply(session_id: str, user_name: str):
     cache_entry = play_session_cache.pop(session_id, None)
@@ -206,6 +228,7 @@ async def webhook(request: Request):
     tg_info_str, emby_username = await format_user_info(user_record, fallback_name=user_name_from_webhook)
     
     user_level_str = format_user_level(user_record)
+    user_expiry_str = format_user_expiry(user_record)
 
     date = convert_utc_to_beijing(data.get('Date', ''))
     session_data = data.get('Session', {})
@@ -220,7 +243,7 @@ async def webhook(request: Request):
         if login_host == '无数据':
             login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
 
-        message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str)
+        message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str, user_expiry_str)
         await send_telegram_message(message_text, thread_id=TG_LOGIN_THREAD_ID)
 
     elif event == EVENT_PLAYBACK_START:
@@ -229,7 +252,7 @@ async def webhook(request: Request):
             login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
             
         item_data = data.get('Item', {})
-        message_text = build_playback_message(date, tg_info_str, emby_username, emby_user_id, item_data, session_data, login_host, user_level_str)
+        message_text = build_playback_message(date, tg_info_str, emby_username, emby_user_id, item_data, session_data, login_host, user_level_str, user_expiry_str)
         await send_telegram_message(message_text, thread_id=TG_PLAY_THREAD_ID, session_id=session_id, user_name=emby_username)
 
     elif event in (EVENT_PLAYBACK_STOP, EVENT_PLAYBACK_PAUSE, EVENT_SESSION_ENDED):
