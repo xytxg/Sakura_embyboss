@@ -7,8 +7,8 @@ from pyrogram.types import CallbackQuery
 from bot import bot, prefixes, LOGGER, emby_line, owner, bot_photo, schedall, config
 from bot.func_helper.emby import emby
 from bot.func_helper.filters import admins_on_filter
-from bot.func_helper.fix_bottons import cv_user_playback_reporting
-from bot.func_helper.msg_utils import sendMessage, editMessage, callAnswer, sendPhoto
+from bot.func_helper.fix_bottons import cv_user_playback_reporting, close_it_ikb
+from bot.func_helper.msg_utils import sendMessage, editMessage, sendPhoto 
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 from bot.sql_helper.sql_emby2 import sql_get_emby2, sql_delete_emby2, sql_add_emby2
 
@@ -91,20 +91,25 @@ async def urm_user(_, msg):
 
 @bot.on_message(filters.command('uinfo', prefixes) & admins_on_filter)
 async def uun_info(_, msg, name = None):
-    try:
-        if name:
-            n = name
-        else:
-            n = msg.command[1]
-    except IndexError:
-        return await asyncio.gather(msg.delete(), sendMessage(msg, "⭕ 用法：/uinfo + emby用户名"))
+    if msg.reply_to_message is None:
+        try:
+            if name:
+                user_id = name
+            else:
+                user_id = msg.command[1]
+        except (IndexError, ValueError):
+            user_id = None
+    else:
+        user_id = msg.reply_to_message.from_user.id
+    if not user_id:
+        return await asyncio.gather(msg.delete(), sendMessage(msg, "⭕ 用法：/uinfo + emby用户名或tgid 或回复用户消息"))
     else:
         text = ''
-        e = sql_get_emby(n)
+        e = sql_get_emby(user_id)
         if not e:
-            e2 = sql_get_emby2(n)
+            e2 = sql_get_emby2(user_id)
             if not e2:
-                return await sendMessage(msg, f'数据库中未查询到 {n}，请手动确认')
+                return await sendMessage(msg, f'数据库中未查询到 {user_id}，请手动确认')
             e = e2
     try:
         a = f'**· 🆔 查询 TG** | {e.tg}\n'
@@ -130,17 +135,22 @@ async def uun_info(_, msg, name = None):
 @bot.on_callback_query(filters.regex('userip') & admins_on_filter)
 @bot.on_message(filters.command('userip', prefixes) & admins_on_filter)
 async def user_cha_ip(_, msg, name = None):
-    try:
-        if isinstance(msg, CallbackQuery):
-            user_id = msg.data.split('-')[1]
-            msg = msg.message
+    if isinstance(msg, CallbackQuery):
+        user_id = msg.data.split('-')[1]
+        msg = msg.message
+    else:
+        if msg.reply_to_message is None:
+            try:
+                if name:
+                    user_id = name
+                else:
+                    user_id = msg.command[1]
+            except (IndexError, ValueError):
+                user_id = None
         else:
-            if name:
-                user_id = name
-            else:
-                user_id = msg.command[1]
-    except IndexError:
-        return await sendMessage(msg, "⭕ 用法：/userip + emby用户名或tgid")
+            user_id = msg.reply_to_message.from_user.id
+    if not user_id:
+        return await sendMessage(msg, "⭕ 用法：/userip + emby用户名或tgid 或回复用户消息")
         
     e = sql_get_emby(user_id)
     if not e:
@@ -181,3 +191,30 @@ async def user_cha_ip(_, msg, name = None):
             if not chunk_text.strip():
                 continue
             await sendMessage(msg, chunk_text)
+@bot.on_message(filters.command('udeviceid', prefixes) & admins_on_filter)
+async def get_user_by_deviceid(_, msg, deviceid = None):
+    try:
+        deviceid = msg.command[1]
+    except IndexError:
+        return await sendMessage(msg, "⭕ 用法：/udeviceid + 设备ID")
+    await msg.delete()
+    success, result = await emby.get_device_by_deviceid(deviceid = deviceid)
+    if not success:
+        return await sendMessage(msg, '获取设备信息失败')
+    else:
+        if isinstance(result, dict) and len(result) > 0:
+            text = '▎ 查询返回:\n'
+            text += f'•🧢 设备名称: {result.get("Name", "无设备名称")}\n'
+            text += f'•🙆‍ App名称: {result.get("AppName", "无App名称")}\n'
+            text += f'•👔 App版本: {result.get("AppVersion", "无App版本")}\n'
+            text += f'•👖 用户名称: {result.get("LastUserName", "无用户名称")}\n'
+            text += f'•👟 用户Id: {result.get("LastUserId", "无用户Id")}\n'
+            text += f'•💼 最后活动时间: {result.get("DateLastActivity", "无最后活动时间")}\n'
+            text += f'•🔐 Ip地址: {result.get("IpAddress", "无Ip地址")}\n'
+            icon = result.get("IconUrl")
+            if icon:
+                await sendPhoto(msg, photo=icon, caption=text, buttons=close_it_ikb)
+            else:
+                await sendMessage(msg, text, buttons=close_it_ikb)
+        else:
+            await sendMessage(msg, "获取设备信息失败")
