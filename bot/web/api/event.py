@@ -14,6 +14,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.errors import PeerIdInvalid
 from bot import LOGGER, bot, api as config_api
 from bot.sql_helper.sql_emby import sql_get_emby
+from bot.sql_helper.sql_emby2 import sql_get_emby2
 from fastapi import APIRouter, Request, Response, HTTPException
 from bot.func_helper.shared_cache import host_cache, play_session_cache, PLAY_SESSION_MAX_SIZE
 
@@ -57,10 +58,22 @@ def format_user_level(user_record) -> str:
     }
     return level_map.get(user_record.lv, " (未知等级)")
 
-def format_user_expiry(user_record) -> str:
-    if not user_record or not hasattr(user_record, 'ex') or user_record.ex is None:
-        return "无数据"
-    return str(user_record.ex)
+def format_user_expiry(user_record, embyid=None) -> str:
+    if user_record and getattr(user_record, 'lv', None) == 'a':
+        return "+ ∞"
+
+    if user_record and getattr(user_record, 'ex', None):
+        return str(user_record.ex)
+
+    if embyid:
+        e2 = sql_get_emby2(embyid)
+        if e2:
+            if getattr(e2, 'lv', None) == 'a':
+                return "+ ∞"
+            if getattr(e2, 'ex', None):
+                return str(e2.ex)
+
+    return "无数据"
 
 async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[str, str]:
     emby_username = fallback_name
@@ -237,7 +250,7 @@ async def webhook(request: Request):
     tg_info_str, emby_username = await format_user_info(user_record, fallback_name=user_name_from_webhook)
     
     user_level_str = format_user_level(user_record)
-    user_expiry_str = format_user_expiry(user_record)
+    user_expiry_str = format_user_expiry(user_record, embyid=emby_user_id)
 
     date = convert_utc_to_beijing(data.get('Date', ''))
     session_data = data.get('Session', {})
