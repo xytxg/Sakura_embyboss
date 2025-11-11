@@ -503,11 +503,22 @@ async def embyblocks(_, call):
             if success is False:
                 stat = '💨 未知'
             else:
-                blocks = rep["Policy"]["BlockedMediaFolders"]
-                if set(config.emby_block).issubset(set(blocks)):
-                    stat = '🔴 隐藏'
-                else:
+                # 新版本使用 EnabledFolders 和 EnableAllFolders 控制访问
+                policy = rep.get("Policy", {})
+                enable_all_folders = policy.get("EnableAllFolders")
+                enabled_folders = policy.get("EnabledFolders", [])
+                
+                if enable_all_folders:
+                    # 如果启用所有文件夹，检查是否有特定的阻止设置
                     stat = '🟢 显示'
+                else:
+                    # 检查目标媒体库是否在启用列表中
+                    # 需要获取媒体库ID来进行比较
+                    target_folder_ids = await emby.get_folder_ids_by_names(config.emby_block)
+                    if target_folder_ids and any(folder_id in enabled_folders for folder_id in target_folder_ids):
+                        stat = '🟢 显示'
+                    else:
+                        stat = '🔴 隐藏'
         except KeyError:
             stat = '💨 未知'
         block = ", ".join(config.emby_block)
@@ -525,18 +536,18 @@ async def user_emby_block(_, call):
     if send is False:
         return
     success, rep = await emby.user(emby_id=embyid)
-    currentblock = []
     if success:
         try:
-            currentblock = list(set(rep["Policy"]["BlockedMediaFolders"] + config.emby_block + ['播放列表']))
-        except KeyError:
-            currentblock = ['播放列表'] + extra_emby_libs + config.emby_block
-        re = await emby.emby_block(emby_id=embyid, stats=0, block=currentblock)
-        if re is True:
-            send1 = await editMessage(call, f'🕶️ ο(=•ω＜=)ρ⌒☆\n 小尾巴隐藏好了！ ', buttons=user_emby_block_ikb)
-            if send1 is False:
-                return
-        else:
+            # 使用封装的隐藏媒体库方法
+            re = await emby.hide_folders_by_names(embyid, config.emby_block)
+            if re is True:
+                send1 = await editMessage(call, f'🕶️ ο(=•ω＜=)ρ⌒☆\n 小尾巴隐藏好了！ ', buttons=user_emby_block_ikb)
+                if send1 is False:
+                    return
+            else:
+                await editMessage(call, f'🕶️ Error!\n 隐藏失败，请上报管理检查)', buttons=back_members_ikb)
+        except Exception as e:
+            LOGGER.error(f"隐藏媒体库失败: {str(e)}")
             await editMessage(call, f'🕶️ Error!\n 隐藏失败，请上报管理检查)', buttons=back_members_ikb)
 
 
@@ -548,23 +559,19 @@ async def user_emby_unblock(_, call):
     if send is False:
         return
     success, rep = await emby.user(emby_id=embyid)
-    currentblock = []
     if success:
         try:
-            currentblock = list(set(rep["Policy"]["BlockedMediaFolders"] + ['播放列表']))
-            # 保留不同的元素
-            currentblock = [x for x in currentblock if x not in config.emby_block] + [x for x in config.emby_block if
-                                                                                      x not in currentblock]
-        except KeyError:
-            currentblock = ['播放列表'] + extra_emby_libs
-        re = await emby.emby_block(emby_id=embyid, stats=0, block=currentblock)
-        if re is True:
-            # await embyblock(_, call)
-            send1 = await editMessage(call, f'🕶️ ┭┮﹏┭┮\n 小尾巴被抓住辽！ ', buttons=user_emby_unblock_ikb)
-            if send1 is False:
-                return
-        else:
-            await editMessage(call, f'🎬 Error!\n 显示失败，请上报管理检查设置', buttons=back_members_ikb)
+            # 使用封装的显示媒体库方法
+            re = await emby.show_folders_by_names(embyid, config.emby_block)
+            if re is True:
+                send1 = await editMessage(call, f'🕶️ ο(=•ω＜=)ρ⌒☆\n 小尾巴显示好了！ ', buttons=user_emby_unblock_ikb)
+                if send1 is False:
+                    return
+            else:
+                await editMessage(call, f'🕶️ Error!\n 显示失败，请上报管理检查设置', buttons=back_members_ikb)
+        except Exception as e:
+            LOGGER.error(f"显示媒体库失败: {str(e)}")
+            await editMessage(call, f'🕶️ Error!\n 显示失败，请上报管理检查设置', buttons=back_members_ikb)
 
 
 @bot.on_callback_query(filters.regex('exchange') & user_in_group_on_filter)
