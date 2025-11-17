@@ -132,7 +132,7 @@ async def handle_auth_request(request: Request):
                 owner_message = (
                     f"🔥 **封禁失败警告** 🔥\n\n"
                     f"{owner_message_content}"
-                    f"‼️ **处置**: API调用失败，**请立即手动封禁该用户！**"
+                    f"‼️ **处置**: API调用失败，**请立即手动检查并封禁该用户！**"
                 )
                 try:
                     await bot.send_message(owner, owner_message, parse_mode=ParseMode.MARKDOWN)
