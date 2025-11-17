@@ -104,27 +104,27 @@ async def kk_user_ban(_, call):
 async def user_embyextralib_unblock(_, call):
     if not judge_admins(call.from_user.id):
         return await call.answer("请不要以下犯上 ok？", show_alert=True)
-    await call.answer(f'🎬 正在为TA开启显示ing')
+    await call.answer('🎬 正在为TA开启显示ing')
     tgid = int(call.data.split("-")[1])
     e = sql_get_emby(tg=tgid)
     if e.embyid is None:
         await editMessage(call, f'💢 ta 没有注册账户。', timer=60)
+        return
     embyid = e.embyid
     success, rep = await emby.user(emby_id=embyid)
-    currentblock = []
     if success:
         try:
-            currentblock = list(set(rep["Policy"]["BlockedMediaFolders"] + ['播放列表']))
-            # 保留不同的元素
-            currentblock = [x for x in currentblock if x not in extra_emby_libs] + [x for x in extra_emby_libs if
-                                                                                    x not in currentblock]
-        except KeyError:
-            currentblock = ["播放列表"]
-        re = await emby.emby_block(emby_id=embyid, stats=0, block=currentblock)
-        if re is True:
-            await editMessage(call, f'🌟 好的，管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n'
-                                    f'已开启了 [TA](tg://user?id={tgid}) 的额外媒体库权限\n{extra_emby_libs}')
-        else:
+            # 使用封装的显示额外媒体库方法
+            re = await emby.show_folders_by_names(embyid, extra_emby_libs)
+            
+            if re is True:
+                await editMessage(call, f'🌟 好的，管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n'
+                                        f'已开启了 [TA](tg://user?id={tgid}) 的额外媒体库权限\n{extra_emby_libs}')
+            else:
+                await editMessage(call,
+                                  f'🌧️ Error！管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n操作失败请检查设置！')
+        except Exception as e:
+            LOGGER.error(f"开启额外媒体库失败: {str(e)}")
             await editMessage(call,
                               f'🌧️ Error！管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n操作失败请检查设置！')
 
@@ -134,25 +134,27 @@ async def user_embyextralib_unblock(_, call):
 async def user_embyextralib_block(_, call):
     if not judge_admins(call.from_user.id):
         return await call.answer("请不要以下犯上 ok？", show_alert=True)
-    await call.answer(f'🎬 正在为TA关闭显示ing')
+    await call.answer('🎬 正在为TA关闭显示ing')
     tgid = int(call.data.split("-")[1])
     e = sql_get_emby(tg=tgid)
     if e.embyid is None:
         await editMessage(call, f'💢 ta 没有注册账户。', timer=60)
+        return
     embyid = e.embyid
     success, rep = await emby.user(emby_id=embyid)
-    currentblock = []
     if success:
         try:
-            currentblock = list(set(rep["Policy"]["BlockedMediaFolders"] + ['播放列表']))
-            currentblock = list(set(currentblock + extra_emby_libs))
-        except KeyError:
-            currentblock = ["播放列表"] + extra_emby_libs
-        re = await emby.emby_block(emby_id=embyid, stats=0, block=currentblock)
-        if re is True:
-            await editMessage(call, f'🌟 好的，管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n'
-                                    f'已关闭了 [TA](tg://user?id={tgid}) 的额外媒体库权限\n{extra_emby_libs}')
-        else:
+            # 使用封装的隐藏额外媒体库方法
+            re = await emby.hide_folders_by_names(embyid, extra_emby_libs)
+            
+            if re is True:
+                await editMessage(call, f'🌟 好的，管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n'
+                                        f'已关闭了 [TA](tg://user?id={tgid}) 的额外媒体库权限\n{extra_emby_libs}')
+            else:
+                await editMessage(call,
+                                  f'🌧️ Error！管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n操作失败请检查设置！')
+        except Exception as e:
+            LOGGER.error(f"关闭额外媒体库失败: {str(e)}")
             await editMessage(call,
                               f'🌧️ Error！管理员 [{call.from_user.first_name}](tg://user?id={call.from_user.id})\n操作失败请检查设置！')
 
