@@ -1,7 +1,7 @@
 import asyncio
 import random
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Dict, List
 from pyrogram import filters
 from bot import bot, prefixes, sakura_b, game, LOGGER
 from bot.func_helper.msg_utils import deleteMessage
@@ -13,6 +13,7 @@ async def get_fullname_with_link(user_id):
         return f"[{tg_info.first_name}](tg://user?id={tg_info.id})"
     except:
         return f"用户{user_id}"
+
 # 存储活跃赌局的字典 (chat_id -> bet_info)
 active_bets: Dict[int, Dict] = {}
 # 存储参与者信息 (bet_id -> list of participants)
@@ -23,6 +24,10 @@ class BettingSystem:
         self.active_bets = active_bets
         self.participants = bet_participants
     
+    def set_start_message_id(self, chat_id: int, message_id: int):
+        if chat_id in self.active_bets:
+            self.active_bets[chat_id]['start_message_id'] = message_id
+
     async def start_bet(self, chat_id: int, user_id: int, message_text: str = "") -> str:
         """创建新的赌局"""
         # 检查是否已有进行中的赌局
@@ -30,7 +35,7 @@ class BettingSystem:
             return "🚫 当前已有进行中的赌局，请等待结束后再开始新的赌局"
         
         # 解析随机方式
-        random_type = 'system'  # 默认使用系统随机
+        random_type = 'system'
         if 'dice' in message_text.lower():
             random_type = 'dice'
         
@@ -42,13 +47,14 @@ class BettingSystem:
             'id': bet_id,
             'chat_id': chat_id,
             'creator_id': user_id,
-            'status': 1,  # 1=进行中, 0=已结束
+            'status': 1,
             'random_type': random_type,
             'create_time': datetime.now(),
             'end_time': datetime.now() + timedelta(minutes=5),
             'total_amount': 0,
             'big_amount': 0,
-            'small_amount': 0
+            'small_amount': 0,
+            'start_message_id': None
         }
         
         self.active_bets[chat_id] = bet_info
@@ -110,7 +116,7 @@ class BettingSystem:
         if not user or not user.embyid:
             return "❌ 您还未注册Emby账户"
         
-        # 检查余额 (假设user.iv是余额字段)
+        # 检查余额
         if user.iv < amount_int:
             return "❌ 余额不足"
         
@@ -184,7 +190,7 @@ class BettingSystem:
                     'tg_id': user.tg,
                     'type': bet_type,
                     'amount': amount_int,
-                    'status': 0  # 0=等待开奖, 1=获胜, 2=失败
+                    'status': 0
                 }
                 self.participants[bet_id].append(participant)
                 
@@ -256,7 +262,7 @@ class BettingSystem:
         
         # 生成随机数
         if bet_info['random_type'] == 'dice':
-            # 模拟Telegram骰子 (1-6)
+            # 模拟Telegram骰子
             result = random.randint(1, 6)
         else:
             # 系统随机
@@ -281,7 +287,7 @@ class BettingSystem:
         
         if winners and total_winner_amount > 0:
             for winner in winners:
-                # 计算个人奖励 (取整)
+                # 计算个人奖励
                 personal_reward = round((winner['amount'] / total_winner_amount) * prize_pool)
                 
                 # 更新用户余额
@@ -290,13 +296,20 @@ class BettingSystem:
                     new_balance = user.iv + personal_reward
                     sql_update_emby(Emby.tg == winner['user_id'], iv=new_balance)
                 
-                winner['status'] = 1  # 标记为获胜
+                winner['status'] = 1
                 
                 user_link = await get_fullname_with_link(winner['tg_id'])
                 result_message += f"🏆 {user_link} 获得 {personal_reward} {sakura_b}\n"
         else:
             result_message += "😅 没有获胜者，投注金额不予退还\n"
         
+        start_msg_id = bet_info.get('start_message_id')
+        if start_msg_id:
+            try:
+                await bot.delete_messages(chat_id, start_msg_id)
+            except Exception as e:
+                LOGGER.info(f"删除赌局主消息失败: {e}")
+
         # 标记赌局结束
         bet_info['status'] = 0
         
@@ -304,6 +317,7 @@ class BettingSystem:
         del self.active_bets[chat_id]
         if bet_id in self.participants:
             del self.participants[bet_id]
+
         # 发送开奖消息
         try:
             result_msg_obj = await bot.send_message(chat_id, result_message)
@@ -346,7 +360,7 @@ class BettingSystem:
                                      f"当前余额：{new_balance} {sakura_b}"
                             )
             except Exception as e:
-                LOGGER.infof("Failed to send bet result notification: {e}")
+                LOGGER.info(f"Failed to send bet result notification: {e}")
         
         return result_message
 
@@ -354,8 +368,6 @@ class BettingSystem:
 betting_system = BettingSystem()
 
 # 注册命令处理器
-from pyrogram import filters
-
 @bot.on_message(filters.command('startbet', prefixes=prefixes) & filters.group)
 # 定义一个异步函数，用于处理开始下注的命令
 async def handle_startbet_command(client, message):
@@ -393,7 +405,9 @@ async def handle_startbet_command(client, message):
 
     result = await betting_system.start_bet(chat_id, user_id, message_text)
     bet_start_message = await message.reply_text(result)
-    asyncio.create_task(deleteMessage(bet_start_message, 60))
+    
+    betting_system.set_start_message_id(chat_id, bet_start_message.id)
+
 @bot.on_message(filters.command('bet', prefixes=prefixes) & filters.group)
 async def handle_bet_command(client, message):
     if not game.bet_open:
