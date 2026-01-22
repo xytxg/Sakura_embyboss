@@ -10,20 +10,20 @@ from bot.func_helper.msg_utils import deleteMessage, editMessage
 from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 
 # 游戏平衡配置（基于每个用户约10个币的设定）
-COMMISSION_FEE = max(1, game.magnification)                    # 抢劫佣金：1币
-MAX_COMMISSION_FEE = max(3, game.magnification * 3)      # 最大抢劫钱：3币
+COMMISSION_FEE = max(1, game.magnification)                    # 抢劫佣金
+MAX_COMMISSION_FEE = max(3, game.magnification * 3)      # 最大抢劫钱
 ROB_TIME = 5                                                                   # 抢劫持续时间
-MIN_ROB_TARGET = max(3, game.magnification * 3)               # 最小抢劫目标：3币
-FIGHT_PENALTY = max(3, game.magnification * 3)                  # 战斗失败惩罚：3币
+MIN_ROB_TARGET = max(3, game.magnification * 3)               # 最小抢劫目标
+FIGHT_PENALTY = max(3, game.magnification * 3)                  # 战斗失败惩罚
 
 # 围观群众奖励配置
-TOTAL_GAME_COINS = max(2, game.magnification * 2)           # 围观奖励池：2币
-PENALTY_CHANCE = 15                                                      # 被惩罚概率：15%
-BONUS_CHANCE = 15                                                         # 获得奖励概率：15%
-PENALTY_AMOUNT = max(2, game.magnification * 2)               # 惩罚扣除：2币
-BONUS_MIN_AMOUNT = max(1, game.magnification)               # 奖励最小：1币
-BONUS_MAX_AMOUNT = max(2, game.magnification * 2)         # 奖励最大：2币
-LUCKY_AMOUNT = max(4, game.magnification * 4)                  # 幸运大奖：4币
+TOTAL_GAME_COINS = max(2, game.magnification * 2)           # 围观奖励池
+PENALTY_CHANCE = 15                                                      # 被惩罚概率
+BONUS_CHANCE = 15                                                         # 获得奖励概率
+PENALTY_AMOUNT = max(1, game.magnification * 1)               # 惩罚扣除
+BONUS_MIN_AMOUNT = max(1, game.magnification)               # 奖励最小
+BONUS_MAX_AMOUNT = max(2, game.magnification * 2)         # 奖励最大
+LUCKY_AMOUNT = max(3, game.magnification * 3)                  # 幸运大奖
 
 rob_games = {}
 rob_locks = {}
