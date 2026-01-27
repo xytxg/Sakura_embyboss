@@ -4,7 +4,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInf
 from pyromod.helpers import ikb, array_chunk
 from datetime import datetime, timezone, timedelta
 from bot import chanel, main_group, bot_name, extra_emby_libs, tz_id, tz_ad, tz_api, _open, sakura_b, \
-    schedall, auto_update, fuxx_pitao, moviepilot, red_envelope, config, LOGGER
+    schedall, auto_update, fuxx_pitao, moviepilot, red_envelope, config, LOGGER, game
 from bot.func_helper import nezha_res
 from bot.func_helper.emby import emby
 from bot.func_helper.utils import members_info
@@ -384,6 +384,7 @@ def config_preparation() -> InlineKeyboardMarkup:
          [(f'设置赠送资格天数({config.kk_gift_days}天)', 'set_kk_gift_days'), (f'设置活跃检测天数({config.activity_check_days}天)', 'set_activity_check_days')],
          [(f'设置封存账号天数({config.freeze_days}天)', 'set_freeze_days')],
          [(f'设置签到权限({checkin_lv_text})', 'set_checkin_lv')],
+         [('🕹️ 游戏设置', 'set_game_config')],
          [('🔙 返回', 'manage')]])
     return keyboard
 
@@ -580,6 +581,20 @@ def mp_config_ikb():
         [(f'{mp_status} 点播功能', 'set_mp_status')],
         [('💰 设置点播价格', 'set_mp_price'), ('👥 设置用户权限', 'set_mp_lv')],
         [('📝 设置日志频道', 'set_mp_log_channel')],
+        [('🔙 返回', 'back_config')]
+    ])
+    return keyboard
+
+def game_config_ikb():
+    """游戏设置面板按钮"""
+    rob_status = '✅' if game.rob_open else '❎'
+    bet_status = '✅' if game.bet_open else '❎'
+    rob_no_emby = '✅' if game.rob_no_emby else '❎'
+    bet_no_emby = '✅' if game.bet_no_emby else '❎'
+    
+    keyboard = ikb([
+        [(f'{rob_status} 抢劫功能', 'set_game_rob_open'), (f'{bet_status} 赌局功能', 'set_game_bet_open')],
+        [(f'{rob_no_emby} 抢劫无Emby', 'set_game_rob_no_emby'), (f'{bet_no_emby} 赌局无Emby', 'set_game_bet_no_emby')],
         [('🔙 返回', 'back_config')]
     ])
     return keyboard

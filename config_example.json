@@ -135,6 +135,8 @@
   "game": {
     "rob_open": true,
     "bet_open": true,
+    "bet_no_emby": false,
+    "rob_no_emby": false,
     "magnification": 10
   }
 }

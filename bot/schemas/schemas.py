@@ -166,6 +166,8 @@ class RedEnvelope(BaseModel):
 class Game(BaseModel):
     rob_open: bool = True
     bet_open: bool = True
+    bet_no_emby: bool = False
+    rob_no_emby: bool = False
     magnification: int = 1
 
 class Config(BaseModel):

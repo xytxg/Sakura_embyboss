@@ -445,3 +445,45 @@ async def set_activity_check_days(_, call):
                               f"🕰️ 【活跃检测天数】\n\n{days}天 **Done!**",
                               buttons=back_config_p_ikb)
             LOGGER.info(f"【admin】：{call.from_user.id} - 更新活跃检测天数为{days}天完成")
+
+@bot.on_callback_query(filters.regex('^set_game_config$') & admins_on_filter)
+async def game_config_panel(_, call):
+    """游戏设置面板"""
+    await callAnswer(call, '🕹️ 游戏设置')
+    from bot.func_helper.fix_bottons import game_config_ikb
+    await editMessage(call, 
+                     "🕹️ 游戏设置面板\n\n"
+                     f"抢劫功能：{'已开启' if config.game.rob_open else '已关闭'}\n"
+                     f"赌局功能：{'已开启' if config.game.bet_open else '已关闭'}\n"
+                     f"抢劫允许无Emby：{'是' if config.game.rob_no_emby else '否'}\n"
+                     f"赌局允许无Emby：{'是' if config.game.bet_no_emby else '否'}\n"
+                     f"游戏倍率：{config.game.magnification}",
+                     buttons=game_config_ikb())
+
+@bot.on_callback_query(filters.regex('^set_game_rob_open$') & admins_on_filter)
+async def set_game_rob_open(_, call):
+    config.game.rob_open = not config.game.rob_open
+    await callAnswer(call, f"抢劫功能已{'开启' if config.game.rob_open else '关闭'}", True)
+    save_config()
+    await game_config_panel(_, call)
+
+@bot.on_callback_query(filters.regex('^set_game_bet_open$') & admins_on_filter)
+async def set_game_bet_open(_, call):
+    config.game.bet_open = not config.game.bet_open
+    await callAnswer(call, f"赌局功能已{'开启' if config.game.bet_open else '关闭'}", True)
+    save_config()
+    await game_config_panel(_, call)
+
+@bot.on_callback_query(filters.regex('^set_game_rob_no_emby$') & admins_on_filter)
+async def set_game_rob_no_emby(_, call):
+    config.game.rob_no_emby = not config.game.rob_no_emby
+    await callAnswer(call, f"抢劫无Emby参与已{'开启' if config.game.rob_no_emby else '关闭'}", True)
+    save_config()
+    await game_config_panel(_, call)
+
+@bot.on_callback_query(filters.regex('^set_game_bet_no_emby$') & admins_on_filter)
+async def set_game_bet_no_emby(_, call):
+    config.game.bet_no_emby = not config.game.bet_no_emby
+    await callAnswer(call, f"赌局无Emby参与已{'开启' if config.game.bet_no_emby else '关闭'}", True)
+    save_config()
+    await game_config_panel(_, call)

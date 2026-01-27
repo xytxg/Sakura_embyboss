@@ -535,9 +535,10 @@ async def handle_rob_callback(client, call):
     async with lock:
         try:
             parts = call.data.split('_')
-            if not sql_get_emby(call.from_user.id):
-                await call.answer("❌ 您还未注册Emby账户！", show_alert=True)
-                return
+            if not game.rob_no_emby:
+                if not sql_get_emby(call.from_user.id):
+                    await call.answer("❌ 您还未注册Emby账户！", show_alert=True)
+                    return
             if len(parts) < 5:
                 await call.answer("❌ 无效的回调数据。", show_alert=True)
                 return
@@ -575,11 +576,12 @@ async def rob_user(_, message):
             asyncio.create_task(deleteMessage(error_msg, 3))
             return
 
-    if not user.embyid:
-        asyncio.create_task(deleteMessage(message, 0))
-        error_msg = await bot.send_message(message.chat.id, '❌ 您还未注册Emby账户')
-        asyncio.create_task(deleteMessage(error_msg, 3))
-        return
+    if not game.rob_no_emby:
+        if not user.embyid:
+            asyncio.create_task(deleteMessage(message, 0))
+            error_msg = await bot.send_message(message.chat.id, '❌ 您还未注册Emby账户')
+            asyncio.create_task(deleteMessage(error_msg, 3))
+            return
 
     asyncio.create_task(deleteMessage(message, 0))
 

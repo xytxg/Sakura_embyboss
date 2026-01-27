@@ -113,8 +113,9 @@ class BettingSystem:
         
         # 获取用户信息
         user = sql_get_emby(user_id)
-        if not user or not user.embyid:
-            return "❌ 您还未注册Emby账户"
+        if not game.bet_no_emby:
+            if not user or not user.embyid:
+                return "❌ 您还未注册Emby账户"
         
         # 检查余额
         if user.iv < amount_int:
