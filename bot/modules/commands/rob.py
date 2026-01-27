@@ -535,8 +535,12 @@ async def handle_rob_callback(client, call):
     async with lock:
         try:
             parts = call.data.split('_')
+            if not sql_get_emby(call.from_user.id):
+                await call.answer(f"❌ 您还未在系统中初始化，请先私信我激活", show_alert=True)
+                return
+            
             if not game.rob_no_emby:
-                if not sql_get_emby(call.from_user.id):
+                if not sql_get_emby(call.from_user.id).embyid:
                     await call.answer("❌ 您还未注册Emby账户！", show_alert=True)
                     return
             if len(parts) < 5:
@@ -568,6 +572,11 @@ async def rob_user(_, message):
         return
         
     user = sql_get_emby(message.from_user.id)
+    if not user:
+        asyncio.create_task(deleteMessage(message, 0))
+        error_msg = await bot.send_message(message.chat.id, f"❌ 您还未在系统中初始化，请先私信我激活")
+        asyncio.create_task(deleteMessage(error_msg, 3))
+        return
 
     if not message.reply_to_message:
         if len(message.command) != 2:
@@ -587,7 +596,7 @@ async def rob_user(_, message):
 
     target_user = sql_get_emby(message.reply_to_message.from_user.id)
     if not target_user:
-        asyncio.create_task(delete_msg_with_error(message, '❌ 目标用户未注册Emby账户!'))
+        asyncio.create_task(delete_msg_with_error(message, f'❌ 目标用户未在系统中初始化，无法抢劫'))
         return
 
     if message.from_user.id == message.reply_to_message.from_user.id:

@@ -113,8 +113,11 @@ class BettingSystem:
         
         # 获取用户信息
         user = sql_get_emby(user_id)
+        if not user:
+            return f"❌ 您还未在系统中初始化，请先私信我激活"
+
         if not game.bet_no_emby:
-            if not user or not user.embyid:
+            if not user.embyid:
                 return "❌ 您还未注册Emby账户"
         
         # 检查余额
