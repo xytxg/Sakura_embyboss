@@ -387,10 +387,16 @@ async def handle_startbet_command(client, message):
     message_text = message.text
 
     user = sql_get_emby(user_id)
-    if not user or not user.embyid:
-        error_message = await message.reply_text("❌ 您还未注册Emby账户")
-        asyncio.create_task(deleteMessage(error_message, 360))
+    if not user:
+        error_message = await message.reply_text(f"❌ 您还未在系统中初始化，请先私信我激活")
+        asyncio.create_task(deleteMessage(error_message, 60))
         return
+
+    if not game.bet_no_emby:
+        if not user.embyid:
+            error_message = await message.reply_text("❌ 您还未注册Emby账户，无法发起赌局")
+            asyncio.create_task(deleteMessage(error_message, 60))
+            return
 
     # 检查用户金币是否足够支付手续费
     if user.iv < game.magnification:

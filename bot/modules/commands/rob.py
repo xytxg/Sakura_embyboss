@@ -578,13 +578,6 @@ async def rob_user(_, message):
         asyncio.create_task(deleteMessage(error_msg, 3))
         return
 
-    if not message.reply_to_message:
-        if len(message.command) != 2:
-            asyncio.create_task(deleteMessage(message, 0))
-            error_msg = await bot.send_message(message.chat.id, "❌ 请使用正确的格式：/rob [目标用户ID] 或回复某人的消息使用 /rob")
-            asyncio.create_task(deleteMessage(error_msg, 3))
-            return
-
     if not game.rob_no_emby:
         if not user.embyid:
             asyncio.create_task(deleteMessage(message, 0))
@@ -592,14 +585,32 @@ async def rob_user(_, message):
             asyncio.create_task(deleteMessage(error_msg, 3))
             return
 
-    asyncio.create_task(deleteMessage(message, 0))
+    if message.reply_to_message:
+        target_id = message.reply_to_message.from_user.id
+    else:
+        if len(message.command) != 2:
+            asyncio.create_task(deleteMessage(message, 0))
+            error_msg = await bot.send_message(message.chat.id, "❌ 请使用正确的格式：/rob [目标用户ID] 或回复某人的消息使用 /rob")
+            asyncio.create_task(deleteMessage(error_msg, 3))
+            return
+        try:
+            target_id = int(message.command[1])
+        except ValueError:
+            asyncio.create_task(delete_msg_with_error(message, "❌ 无效的用户ID格式"))
+            return
 
-    target_user = sql_get_emby(message.reply_to_message.from_user.id)
+    target_user = sql_get_emby(target_id)
+    
     if not target_user:
         asyncio.create_task(delete_msg_with_error(message, f'❌ 目标用户未在系统中初始化，无法抢劫'))
         return
 
-    if message.from_user.id == message.reply_to_message.from_user.id:
+    if not game.rob_no_emby:
+        if not target_user.embyid:
+            asyncio.create_task(delete_msg_with_error(message, '❌ 目标用户尚未注册 Emby 账户，受到保护无法被抢劫'))
+            return
+
+    if message.from_user.id == target_id:
         asyncio.create_task(delete_msg_with_error(message, "❌ 不能抢劫自己哦"))
         return
 
@@ -616,20 +627,23 @@ async def rob_user(_, message):
         asyncio.create_task(delete_msg_with_error(message, f'❌ 您的{sakura_b}不足以支付委托费用({COMMISSION_FEE}个)'))
         return
 
+    asyncio.create_task(deleteMessage(message, 0))
+
     change_emby_amount(user.tg, user.iv - COMMISSION_FEE)
+    
     user_with_link = await get_fullname_with_link(user.tg)
     target_with_link = await get_fullname_with_link(target_user.tg)
-    message = await bot.send_message(
+    
+    announcement = await bot.send_message(
         message.chat.id,
         f"接受 { user_with_link } 的委托\n委托费 {COMMISSION_FEE} 抢劫 {target_with_link}",
         reply_to_message_id=message.id
     )
-    asyncio.create_task(deleteMessage(message, 30))
+    asyncio.create_task(deleteMessage(announcement, 30))
 
     await bot.send_message(
         user.tg,
-        f"✅ 您已成功雇佣乱世的盗贼\n💰 扣除雇佣费：{COMMISSION_FEE} {sakura_b}\n💳 当前余额：{sql_get_emby(user.tg).iv} {sakura_b}",
-        reply_to_message_id=message.id
+        f"✅ 您已成功雇佣乱世的盗贼\n💰 扣除雇佣费：{COMMISSION_FEE} {sakura_b}\n💳 当前余额：{sql_get_emby(user.tg).iv} {sakura_b}"
     )
     await start_rob(message, user, target_user)
 
