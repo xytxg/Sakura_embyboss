@@ -17,6 +17,9 @@ play_session_cache = OrderedDict()
 PLAY_SESSION_EXPIRATION = 7200
 PLAY_SESSION_MAX_SIZE = 500
 
+ip_cache = {}
+IP_CACHE_EXPIRATION = 3600
+
 def _clean_expired_caches_task():
     LOGGER.info("🚀 共享缓存清理线程已启动")
     
@@ -40,6 +43,14 @@ def _clean_expired_caches_task():
             if expired_session_keys:
                 for key in expired_session_keys:
                     play_session_cache.pop(key, None)
+
+            expired_ip_keys = [
+                key for key, data in list(ip_cache.items())
+                if now - data.get('timestamp', 0) > IP_CACHE_EXPIRATION
+            ]
+            if expired_ip_keys:
+                for key in expired_ip_keys:
+                    ip_cache.pop(key, None)
 
         except Exception as e:
             error_info = f"{type(e).__name__}: {e}"

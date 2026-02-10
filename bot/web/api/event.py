@@ -16,7 +16,7 @@ from bot import LOGGER, bot, api as config_api
 from bot.sql_helper.sql_emby import sql_get_emby
 from bot.sql_helper.sql_emby2 import sql_get_emby2
 from fastapi import APIRouter, Request, Response, HTTPException
-from bot.func_helper.shared_cache import host_cache, play_session_cache, PLAY_SESSION_MAX_SIZE
+from bot.func_helper.shared_cache import host_cache, play_session_cache, ip_cache, PLAY_SESSION_MAX_SIZE
 
 route = APIRouter()
 
@@ -109,9 +109,54 @@ async def format_user_info(user_record, fallback_name='未知用户') -> Tuple[s
     tg_info_str = f"   - **无数据**"
     return tg_info_str, emby_username
 
+async def get_ip_location(ip: str) -> str:
+    """获取 IP 定位信息"""
+    if not ip or ip == '无数据':
+        return ""
+    
+    if ip in ip_cache:
+        return ip_cache[ip].get('location', "")
+
+    url = f"https://geoip.icysn.com/api/json?ip={ip}"
+    headers = {
+        "Accept-Encoding": "gzip, deflate"
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=5, headers=headers) as response:
+                if response.status == 200:
+                    res = await response.json()
+                    if res.get('code') == 0 and 'data' in res:
+                        data = res['data']
+                        parts = []
+                        
+                        country = data.get('country', {}).get('name')
+                        if country: parts.append(country)
+                        
+                        regions = data.get('regions', [])
+                        if regions: parts.extend(regions)
+                        
+                        isp = data.get('as', {}).get('info')
+                        if isp: parts.append(isp)
+                        
+                        net_type = data.get('type')
+                        if net_type: parts.append(net_type)
+                        
+                        location_str = " ".join(parts)
+
+                        ip_cache[ip] = {
+                            'location': location_str,
+                            'timestamp': time.time()
+                        }
+                        return location_str
+    except Exception as e:
+        LOGGER.error(f"获取 IP 定位失败 ({ip}): {e}")
+    
+    return ""
+
 # --- 消息构建函数 ---
 
-def build_login_message(date, tg_info_str, emby_username, user_id, session_data, login_host, user_level_str, user_expiry_str):
+def build_login_message(date, tg_info_str, emby_username, user_id, session_data, login_host, user_level_str, user_expiry_str, ip_location=""):
     client_name = session_data.get('Client', '无数据')
     client_version = session_data.get('ApplicationVersion', '无数据')
     device_name = session_data.get('DeviceName', '无数据')
@@ -131,11 +176,12 @@ def build_login_message(date, tg_info_str, emby_username, user_id, session_data,
         f"   - **设备 ID:** `{device_id}`\n\n"
         f"🌐 **网络信息:**\n"
         f"   - **用户 IP:** `{remote_ip}`\n"
+        f"   - **IP 信息:** `{ip_location or '无数据'}`\n"
         f"   - **登录线路:** `{login_host}`"
     )
 
 
-def build_playback_message(date, tg_info_str, emby_username, user_id, item_data, session_data, login_host, user_level_str, user_expiry_str):
+def build_playback_message(date, tg_info_str, emby_username, user_id, item_data, session_data, login_host, user_level_str, user_expiry_str, ip_location=""):
     series_name = item_data.get('SeriesName', '电影')
     episode_name = item_data.get('Name', '无数据')
     media_type = item_data.get('Type', '无数据')
@@ -174,6 +220,7 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
         f"   - **设备 ID:** `{device_id}`\n\n"
         f"🌐 **网络信息:**\n"
         f"   - **用户 IP:** `{remote_ip}`\n"
+        f"   - **IP 信息:** `{ip_location or '无数据'}`\n"
         f"   - **播放线路:** `{login_host}`"
     )
 
@@ -256,6 +303,8 @@ async def webhook(request: Request):
     session_data = data.get('Session', {})
     session_id = session_data.get('Id')
     device_id = session_data.get('DeviceId', '无数据')
+    remote_ip = session_data.get('RemoteEndPoint', '无数据')
+    ip_location = await get_ip_location(remote_ip)
 
     # --- 事件处理分发 ---
     if event == EVENT_USER_AUTHENTICATED:
@@ -265,7 +314,7 @@ async def webhook(request: Request):
         if login_host == '无数据':
             login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
 
-        message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str, user_expiry_str)
+        message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str, user_expiry_str, ip_location=ip_location)
         await send_telegram_message(message_text, thread_id=TG_LOGIN_THREAD_ID)
 
     elif event == EVENT_PLAYBACK_START:
@@ -274,7 +323,7 @@ async def webhook(request: Request):
             login_host = host_cache.get(emby_user_id, {}).get('host', '无数据')
             
         item_data = data.get('Item', {})
-        message_text = build_playback_message(date, tg_info_str, emby_username, emby_user_id, item_data, session_data, login_host, user_level_str, user_expiry_str)
+        message_text = build_playback_message(date, tg_info_str, emby_username, emby_user_id, item_data, session_data, login_host, user_level_str, user_expiry_str, ip_location=ip_location)
         await send_telegram_message(message_text, thread_id=TG_PLAY_THREAD_ID, session_id=session_id, user_name=emby_username)
 
     elif event in (EVENT_PLAYBACK_STOP, EVENT_PLAYBACK_PAUSE, EVENT_SESSION_ENDED):
