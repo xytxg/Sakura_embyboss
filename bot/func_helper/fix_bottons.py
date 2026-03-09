@@ -19,46 +19,43 @@ def judge_start_ikb(is_admin: bool, account: bool) -> InlineKeyboardMarkup:
     """
     start面板按钮
     """
-    buttons = []
-
     if not account:
-        buttons.append([
-            InlineKeyboardButton("🎟️ 使用注册码", callback_data="exchange"),
-            InlineKeyboardButton("👑 创建账户", callback_data="create")
-        ])
-
-        tg_buttons = [InlineKeyboardButton("⭕ 换绑TG", callback_data="changetg")]
-        if  _open.bindtg:
-            tg_buttons.append(InlineKeyboardButton("🔍 绑定TG", callback_data="bindtg"))
-        buttons.append(tg_buttons)
-
+        d = []
+        d.append(['🎟️ 使用注册码', 'exchange'])
+        d.append(['👑 创建账户', 'create'])
+        d.append(['⭕ 换绑TG', 'changetg'])
+        d.append(['🔍 绑定TG', 'bindtg'])
+        # 如果邀请等级为d （未注册用户也能使用），则显示兑换商店
         if _open.invite_lv == 'd':
-            buttons.append([InlineKeyboardButton("🏪 兑换商店", callback_data="storeall")])
+            d.append(['🏪 兑换商店', 'storeall'])
     else:
-        buttons.append([
-            InlineKeyboardButton("️👥 用户功能", callback_data="members"),
-            InlineKeyboardButton("🌐 服务器", callback_data="server")
-        ])
+        d = [['️👥 用户功能', 'members'], ['🌐 服务器', 'server']]
         if schedall.check_ex:
-            buttons.append([InlineKeyboardButton("🎟️ 使用续期码", callback_data="exchange")])
-
+            d.append(['🎟️ 使用续期码', 'exchange'])
+        if schedall.partition_check and len(config.partition_libs) > 0:
+            d.append(['🎟️ 使用分区码', 'partitioncode'])
     if _open.checkin:
+        d.append(['🎯 签到', 'checkin'])
+
+    lines = array_chunk(d, 2)
+    if is_admin: 
+        lines.append([['👮🏻‍♂️ admin', 'manage']])
+
+    keyword = ikb(lines)
+
+    if _open.checkin and config_api.webapp_url and config_api.webapp_url.strip():
         try:
-            if config_api.webapp_url and config_api.webapp_url.strip() != "":
-                checkin_url = config_api.webapp_url.rstrip('/') + "/checkin/web"
-                webapp_button = InlineKeyboardButton("🎯 签到", web_app=WebAppInfo(url=checkin_url))
-                buttons.append([webapp_button])
-            else:
-                today_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
-                buttons.append([InlineKeyboardButton("🎯 签到", callback_data=f"checkin:{today_str}")])
-        except Exception as e:
-            today_str = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d')
-            buttons.append([InlineKeyboardButton("🎯 签到", callback_data=f"checkin:{today_str}")])
+            checkin_url = config_api.webapp_url.rstrip('/') + "/checkin/web"
+            for row in keyword.inline_keyboard:
+                for btn in row:
+                    if btn.callback_data == "checkin":
+                        btn.callback_data = None
+                        btn.web_app = WebAppInfo(url=checkin_url)
+        except Exception:
+            pass
 
-    if is_admin:
-        buttons.append([InlineKeyboardButton("👮🏻‍♂️ admin", callback_data="manage")])
+    return keyword
 
-    return InlineKeyboardMarkup(buttons)
 
 # un_group_answer
 group_f = ikb([[('点击我(●ˇ∀ˇ●)', f't.me/{bot_name}', 'url')]])
@@ -381,6 +378,7 @@ def config_preparation() -> InlineKeyboardMarkup:
          [(f'{leave_ban} 退群封禁', 'leave_ban'), (f'{uplays} 观影奖励结算', 'set_uplays')],
          [(f'{auto_up} 自动更新bot', 'set_update'), (f'{mp_set} Moviepilot点播', 'set_mp')],
          [(f'{red_envelope_status} 红包', 'set_red_envelope_status'), (f'{allow_private} 专属红包', 'set_red_envelope_allow_private')],
+            [('🎟️ 分区通行码', 'partition_code_panel')],
          [(f'设置赠送资格天数({config.kk_gift_days}天)', 'set_kk_gift_days'), (f'设置活跃检测天数({config.activity_check_days}天)', 'set_activity_check_days')],
          [(f'设置封存账号天数({config.freeze_days}天)', 'set_freeze_days')],
          [(f'设置签到权限({checkin_lv_text})', 'set_checkin_lv')],
@@ -493,6 +491,7 @@ def sched_buttons():
     check_ex = '✅' if schedall.check_ex else '❎'
     low_activity = '✅' if schedall.low_activity else '❎'
     backup_db = '✅' if schedall.backup_db else '❎'
+    partition_check = '✅' if getattr(schedall, 'partition_check', True) else '❎'
     keyboard = InlineKeyboard(row_width=2)
     keyboard.add(InlineButton(f'{dayrank} 播放日榜', f'sched-dayrank'),
                  InlineButton(f'{weekrank} 播放周榜', f'sched-weekrank'),
@@ -500,7 +499,8 @@ def sched_buttons():
                  InlineButton(f'{weekplayrank} 观影周榜', f'sched-weekplayrank'),
                  InlineButton(f'{check_ex} 到期保号', f'sched-check_ex'),
                  InlineButton(f'{low_activity} 活跃保号', f'sched-low_activity'),
-                 InlineButton(f'{backup_db} 自动备份数据库', f'sched-backup_db')
+                 InlineButton(f'{backup_db} 自动备份数据库', f'sched-backup_db'),
+                 InlineButton(f'{partition_check} 分区授权检查', f'sched-partition_check')
                  )
     keyboard.row(InlineButton(f'🫧 返回', 'manage'))
     return keyboard
