@@ -37,6 +37,8 @@ class Open(BaseModel):
     stat: bool
     open_us: int = 30
     all_user: int
+    register_worker_count: int = 5
+    register_queue_limit: int = 100
     timing: int = 0
     tem: Optional[int] = 0
     # allow_code: StrictBool
@@ -229,6 +231,10 @@ class Config(BaseModel):
     client_filter_terminate_session: bool = True
     # 是否在检测到可疑客户端时封禁用户
     client_filter_block_user: bool = False
+    # 是否在检测到线路权限违规时终止会话
+    line_filter_terminate_session: bool = True
+    # 是否在检测到线路权限违规时封禁用户
+    line_filter_block_user: bool = False
     # 分区名 -> 库名列表
     partition_libs: Dict[str, List[str]] = Field(default_factory=dict)
     moviepilot: MP = Field(default_factory=MP)
