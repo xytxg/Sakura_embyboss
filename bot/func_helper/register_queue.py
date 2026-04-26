@@ -164,6 +164,8 @@ class RegisterQueueManager:
             else:
                 ex_text = '__无需保号，放心食用__'
 
+            emby_line_variable = emby_line.format(name=job.username, pwd=pwd)
+
             await self._safe_edit(
                 job.status_message,
                 f'**▎创建用户成功🎉**\n\n'
@@ -172,7 +174,7 @@ class RegisterQueueManager:
                 f'· 安全密码 | `{job.pwd2}`（仅发送一次）\n'
                 f'· 到期时间 | `{ex_text}`\n'
                 f'· 当前线路：\n'
-                f'{emby_line}\n\n'
+                f'{emby_line_variable}\n\n'
                 f'**·【服务器】 - 查看线路和密码**',
             )
 
