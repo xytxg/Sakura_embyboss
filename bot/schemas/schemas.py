@@ -52,6 +52,7 @@ class Open(BaseModel):
     checkin_lv: Optional[str] = 'd'
     exchange: bool
     whitelist: bool
+    use_whitelist_code: bool = False
     invite: bool
     invite_lv: Optional[str] = 'b'
     leave_ban: bool
@@ -225,8 +226,14 @@ class Config(BaseModel):
     freeze_days: int = 5
     # 白名单用户专属的emby线路
     emby_whitelist_line: Optional[str] = None
+    # 客户端过滤总开关
+    client_filter_enabled: bool = False
     # 被拦截的user-agent模式列表
     blocked_clients: Optional[List[str]] = None
+    # 客户端过滤模式：blacklist=命中黑名单拦截，whitelist=未命中白名单拦截
+    client_filter_mode: str = "blacklist"
+    # 被允许的user-agent模式列表，仅client_filter_mode为whitelist时生效
+    allowed_clients: Optional[List[str]] = None
     # 是否在检测到可疑客户端时终止会话
     client_filter_terminate_session: bool = True
     # 是否在检测到可疑客户端时封禁用户
