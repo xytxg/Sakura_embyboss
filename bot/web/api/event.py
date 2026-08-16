@@ -8,11 +8,11 @@ import time
 import pytz
 import aiohttp
 import asyncio
-from typing import Tuple
-from datetime import datetime
+from typing import Optional, Tuple
+from datetime import datetime, timedelta
 from pyrogram.enums import ParseMode
 from pyrogram.errors import PeerIdInvalid
-from bot import LOGGER, bot, api as config_api
+from bot import LOGGER, bot, owner, api as config_api
 from bot.sql_helper.sql_emby import sql_get_emby
 from bot.sql_helper.sql_emby2 import sql_get_emby2
 from fastapi import APIRouter, Request, Response, HTTPException
@@ -26,6 +26,8 @@ TG_LOG_CHAT_ID = config_api.log_to_tg.chat_id
 TG_LOGIN_THREAD_ID = config_api.log_to_tg.login_thread_id
 TG_PLAY_THREAD_ID = config_api.log_to_tg.play_thread_id
 IGNORED_USERS_SET = config_api.log_to_tg.ignore_users
+EXPIRED_LOGIN_ALERT_COOLDOWN = 3600
+expired_login_alerts = {}
 
 # --- 事件常量 ---
 EVENT_USER_AUTHENTICATED = 'user.authenticated'
@@ -35,17 +37,50 @@ EVENT_PLAYBACK_PAUSE = 'playback.pause'
 EVENT_SESSION_ENDED = 'playback.sessionended'
 
 # --- 工具函数 ---
-def convert_utc_to_beijing(utc_str: str) -> str:
+def parse_utc_to_beijing(utc_str: str) -> Optional[datetime]:
     try:
         match = re.search(r"(\.\d{6})\d*Z?$", utc_str)
         if match:
             utc_str = utc_str[:match.start(1)] + match.group(1) + "Z"
 
         utc_time = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
-        return utc_time.astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+        return utc_time.astimezone(pytz.timezone("Asia/Shanghai")).replace(tzinfo=None)
     except Exception as e:
         LOGGER.error(f"时间转换失败: {e}, 原始字符串: '{utc_str}'")
-        return "未知时间"
+        return None
+
+def get_expiry_check_time(expiry: datetime) -> datetime:
+    if expiry.tzinfo is not None:
+        expiry = expiry.astimezone(pytz.timezone("Asia/Shanghai")).replace(tzinfo=None)
+
+    check_time = expiry.replace(hour=1, minute=30, second=0, microsecond=0)
+    if check_time < expiry:
+        check_time += timedelta(days=1)
+    return check_time
+
+def should_alert_expired_login(user_record, emby_user_id: str, login_time: Optional[datetime]) -> Optional[datetime]:
+    if not login_time:
+        return None
+
+    expiry_record = user_record
+    if not expiry_record or not getattr(expiry_record, 'ex', None):
+        expiry_record = sql_get_emby2(emby_user_id)
+
+    expiry = getattr(expiry_record, 'ex', None) if expiry_record else None
+    if not expiry or getattr(expiry_record, 'lv', None) == 'a':
+        return None
+
+    check_time = get_expiry_check_time(expiry)
+    if login_time < check_time:
+        return None
+
+    now = time.monotonic()
+    last_alert = expired_login_alerts.get(emby_user_id)
+    if last_alert is not None and now - last_alert < EXPIRED_LOGIN_ALERT_COOLDOWN:
+        return None
+
+    expired_login_alerts[emby_user_id] = now
+    return check_time
 
 def format_user_level(user_record) -> str:
     if not user_record or not hasattr(user_record, 'lv'):
@@ -299,7 +334,8 @@ async def webhook(request: Request):
     user_level_str = format_user_level(user_record)
     user_expiry_str = format_user_expiry(user_record, embyid=emby_user_id)
 
-    date = convert_utc_to_beijing(data.get('Date', ''))
+    login_time = parse_utc_to_beijing(data.get('Date', ''))
+    date = login_time.strftime("%Y-%m-%d %H:%M:%S") if login_time else "未知时间"
     session_data = data.get('Session', {})
     session_id = session_data.get('Id')
     device_id = session_data.get('DeviceId', '无数据')
@@ -316,6 +352,18 @@ async def webhook(request: Request):
 
         message_text = build_login_message(date, tg_info_str, emby_username, emby_user_id, session_data, login_host, user_level_str, user_expiry_str, ip_location=ip_location)
         await send_telegram_message(message_text, thread_id=TG_LOGIN_THREAD_ID)
+
+        expiry_check_time = should_alert_expired_login(user_record, emby_user_id, login_time)
+        if expiry_check_time:
+            owner_message = (
+                f"🚨 **到期后仍可登录告警**\n"
+                f"⏱ **到期检测应执行时间:** `{expiry_check_time.strftime('%Y-%m-%d %H:%M:%S')}`\n\n"
+                f"{message_text}"
+            )
+            try:
+                await bot.send_message(owner, owner_message, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                LOGGER.error(f"向 Owner 发送到期登录告警失败: {e}")
 
     elif event == EVENT_PLAYBACK_START:
         login_host = host_cache.get(device_id, {}).get('host', '无数据')
