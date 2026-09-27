@@ -28,9 +28,6 @@ class DictCache(Cache):
         if not self.delete(key):
             raise KeyError(key)
 
-    def __len__(self):
-        return self.size()
-
     def pop(self, key, default=None):
         if self.has(key):
             val = self.get(key)
