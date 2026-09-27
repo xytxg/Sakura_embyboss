@@ -97,10 +97,18 @@ def _install_check_expired_hook():
         import sys
         if 'bot.modules.panel.sched_panel' in sys.modules:
             sp = sys.modules['bot.modules.panel.sched_panel']
-            if hasattr(sp, 'sched_dict') and 'check_ex' in sp.sched_dict:
-                sp.sched_dict['check_ex'] = _hooked_check_expired
+            if hasattr(sp, 'action_dict') and 'check_ex' in sp.action_dict:
+                sp.action_dict['check_ex'] = _hooked_check_expired
             if hasattr(sp, 'check_expired'):
                 sp.check_expired = _hooked_check_expired
+
+        try:
+            from bot.func_helper.scheduler import scheduler
+            if hasattr(scheduler, 'SCHEDULER') and scheduler.SCHEDULER.get_job('check_expired'):
+                scheduler.SCHEDULER.modify_job('check_expired', func=_hooked_check_expired)
+        except Exception:
+            pass
+
         LOGGER.info("✅ 已成功装载到期封禁/删除通知重定向及私聊容灾 Hook")
     except Exception as e:
         LOGGER.warning(f"装载 check_expired Hook 异常: {e}")
