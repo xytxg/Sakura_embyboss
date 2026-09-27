@@ -260,12 +260,13 @@ def build_playback_message(date, tg_info_str, emby_username, user_id, item_data,
     )
 
 # --- Telegram 交互 ---
-async def send_telegram_message(text: str, thread_id: str = None, session_id: str = None, user_name: str = None):
-    if not TG_LOG_BOT_TOKEN or not TG_LOG_CHAT_ID:
+async def send_telegram_message(text: str, chat_id: int = None, thread_id: str = None, session_id: str = None, user_name: str = None):
+    target_chat = chat_id or TG_LOG_CHAT_ID
+    if not TG_LOG_BOT_TOKEN or not target_chat:
         return
 
     url = f"https://api.telegram.org/bot{TG_LOG_BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': TG_LOG_CHAT_ID, 'text': text, 'parse_mode': ParseMode.MARKDOWN.value}
+    payload = {'chat_id': target_chat, 'text': text, 'parse_mode': ParseMode.MARKDOWN.value}
     if thread_id:
         payload['message_thread_id'] = thread_id
 
@@ -283,13 +284,11 @@ async def send_telegram_message(text: str, thread_id: str = None, session_id: st
                             if message_id:
                                 play_session_cache[session_id] = {
                                     'message_id': message_id,
-                                    'chat_id': TG_LOG_CHAT_ID,
+                                    'chat_id': target_chat,
                                     'thread_id': thread_id,
                                     'user_name': user_name,
                                     'timestamp': time.time()
                                 }
-                                if len(play_session_cache) > PLAY_SESSION_MAX_SIZE:
-                                    play_session_cache.popitem(last=False)
                         return
                     else:
                         raise Exception(f"HTTP {response.status} - {await response.text()}")
@@ -360,10 +359,13 @@ async def webhook(request: Request):
                 f"⏱ **到期检测应执行时间:** `{expiry_check_time.strftime('%Y-%m-%d %H:%M:%S')}`\n\n"
                 f"{message_text}"
             )
-            try:
-                await bot.send_message(owner, owner_message, parse_mode=ParseMode.MARKDOWN)
-            except Exception as e:
-                LOGGER.error(f"向 Owner 发送到期登录告警失败: {e}")
+            if TG_LOG_BOT_TOKEN and owner:
+                await send_telegram_message(owner_message, chat_id=owner)
+            else:
+                try:
+                    await bot.send_message(owner, owner_message, parse_mode=ParseMode.MARKDOWN)
+                except Exception as e:
+                    LOGGER.error(f"向 Owner 发送到期登录告警失败: {e}")
 
     elif event == EVENT_PLAYBACK_START:
         login_host = host_cache.get(device_id, {}).get('host', '无数据')

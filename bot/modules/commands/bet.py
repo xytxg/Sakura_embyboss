@@ -10,8 +10,9 @@ from bot.sql_helper.sql_emby import sql_get_emby, sql_update_emby, Emby
 async def get_fullname_with_link(user_id):
     try:
         tg_info = await bot.get_users(user_id)
-        return f"[{tg_info.first_name}](tg://user?id={tg_info.id})"
-    except:
+        name = (tg_info.first_name or f"用户{user_id}").replace("[", "").replace("]", "")
+        return f"[{name}](tg://user?id={tg_info.id})"
+    except Exception:
         return f"用户{user_id}"
 
 # 存储活跃赌局的字典 (chat_id -> bet_info)
@@ -23,6 +24,7 @@ class BettingSystem:
     def __init__(self):
         self.active_bets = active_bets
         self.participants = bet_participants
+        self.lock = asyncio.Lock()
     
     def set_start_message_id(self, chat_id: int, message_id: int):
         if chat_id in self.active_bets:
@@ -30,37 +32,38 @@ class BettingSystem:
 
     async def start_bet(self, chat_id: int, user_id: int, message_text: str = "") -> str:
         """创建新的赌局"""
-        # 检查是否已有进行中的赌局
-        if chat_id in self.active_bets:
-            return "🚫 当前已有进行中的赌局，请等待结束后再开始新的赌局"
-        
-        # 解析随机方式
-        random_type = 'system'
-        if 'dice' in message_text.lower():
-            random_type = 'dice'
-        
-        # 创建赌局ID
-        bet_id = f"{chat_id}_{int(datetime.now().timestamp())}"
-        
-        # 创建新赌局
-        bet_info = {
-            'id': bet_id,
-            'chat_id': chat_id,
-            'creator_id': user_id,
-            'status': 1,
-            'random_type': random_type,
-            'create_time': datetime.now(),
-            'end_time': datetime.now() + timedelta(minutes=5),
-            'total_amount': 0,
-            'big_amount': 0,
-            'small_amount': 0,
-            'start_message_id': None
-        }
-        
-        self.active_bets[chat_id] = bet_info
-        self.participants[bet_id] = []
+        async with self.lock:
+            # 检查是否已有进行中的赌局
+            if chat_id in self.active_bets:
+                return "🚫 当前已有进行中的赌局，请等待结束后再开始新的赌局"
+            
+            # 解析随机方式
+            random_type = 'system'
+            if 'dice' in message_text.lower():
+                random_type = 'dice'
+            
+            # 创建赌局ID
+            bet_id = f"{chat_id}_{int(datetime.now().timestamp())}"
+            
+            # 创建新赌局
+            bet_info = {
+                'id': bet_id,
+                'chat_id': chat_id,
+                'creator_id': user_id,
+                'status': 1,
+                'random_type': random_type,
+                'create_time': datetime.now(),
+                'end_time': datetime.now() + timedelta(minutes=5),
+                'total_amount': 0,
+                'big_amount': 0,
+                'small_amount': 0,
+                'start_message_id': None
+            }
+            
+            self.active_bets[chat_id] = bet_info
+            self.participants[bet_id] = []
 
-        asyncio.create_task(self._auto_draw(chat_id, bet_id))
+            asyncio.create_task(self._auto_draw(chat_id, bet_id))
 
         user_link = await get_fullname_with_link(user_id)
 
@@ -86,6 +89,10 @@ class BettingSystem:
     
     async def place_bet(self, chat_id: int, user_id: int, bet_type: str, amount: str) -> str:
         """参与赌局"""
+        async with self.lock:
+            return await self._place_bet_impl(chat_id, user_id, bet_type, amount)
+
+    async def _place_bet_impl(self, chat_id: int, user_id: int, bet_type: str, amount: str) -> str:
         # 验证金额
         try:
             amount_int = int(amount)

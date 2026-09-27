@@ -1,64 +1,55 @@
 #! /usr/bin/python3
 # -*- coding: utf-8 -*-
 """
-shared_cache.py - 缓存管理模块
+shared_cache.py - 共享缓存管理模块与到期通知 Hook
 """
 
-import time
-import threading
-from collections import OrderedDict
-from bot import LOGGER
+from cacheout import Cache
+from bot import LOGGER, owner, config
 
-# --- 共享缓存定义 ---
-host_cache = {}
+# --- 共享缓存定义 (基于 Cache，支持自动 TTL 与 LRU 淘汰) ---
 HOST_CACHE_EXPIRATION = 600
+host_cache = Cache(maxsize=2000, ttl=HOST_CACHE_EXPIRATION)
 
-play_session_cache = OrderedDict()
 PLAY_SESSION_EXPIRATION = 7200
 PLAY_SESSION_MAX_SIZE = 500
+play_session_cache = Cache(maxsize=PLAY_SESSION_MAX_SIZE, ttl=PLAY_SESSION_EXPIRATION)
 
-ip_cache = {}
 IP_CACHE_EXPIRATION = 3600
+ip_cache = Cache(maxsize=2000, ttl=IP_CACHE_EXPIRATION)
 
-def _clean_expired_caches_task():
-    LOGGER.info("🚀 共享缓存清理线程已启动")
-    
-    while True:
-        try:
-            time.sleep(60)
-            now = time.time()
 
-            expired_host_keys = [
-                key for key, data in list(host_cache.items())
-                if now - data.get('timestamp', 0) > HOST_CACHE_EXPIRATION
-            ]
-            if expired_host_keys:
-                for key in expired_host_keys:
-                    host_cache.pop(key, None)
-            
-            expired_session_keys = [
-                key for key, data in list(play_session_cache.items())
-                if now - data.get('timestamp', 0) > PLAY_SESSION_EXPIRATION
-            ]
-            if expired_session_keys:
-                for key in expired_session_keys:
-                    play_session_cache.pop(key, None)
+def _install_check_expired_hook():
+    try:
+        import bot.scheduler.check_ex as check_ex
+        _orig_check_expired = check_ex.check_expired
 
-            expired_ip_keys = [
-                key for key, data in list(ip_cache.items())
-                if now - data.get('timestamp', 0) > IP_CACHE_EXPIRATION
-            ]
-            if expired_ip_keys:
-                for key in expired_ip_keys:
-                    ip_cache.pop(key, None)
+        async def _hooked_check_expired():
+            ban_del_to_owner = getattr(config, 'ban_del_to_owner', False)
+            if not ban_del_to_owner and hasattr(config, 'api') and hasattr(config.api, 'log_to_tg'):
+                ban_del_to_owner = getattr(config.api.log_to_tg, 'ban_del_to_owner', False)
 
-        except Exception as e:
-            error_info = f"{type(e).__name__}: {e}"
-            LOGGER.critical(
-                f"FATAL: 共享缓存清理线程发生严重错误，已停止！"
-                f"请立即检查并重启服务以防内存泄漏。错误详情: {error_info}"
-            )
-            break
+            if ban_del_to_owner:
+                orig_group = check_ex.group
+                try:
+                    check_ex.group = [owner]
+                    return await _orig_check_expired()
+                finally:
+                    check_ex.group = orig_group
+            return await _orig_check_expired()
 
-cleaner_thread = threading.Thread(target=_clean_expired_caches_task, daemon=True)
-cleaner_thread.start()
+        check_ex.check_expired = _hooked_check_expired
+
+        import sys
+        if 'bot.modules.panel.sched_panel' in sys.modules:
+            sp = sys.modules['bot.modules.panel.sched_panel']
+            if hasattr(sp, 'sched_dict') and 'check_ex' in sp.sched_dict:
+                sp.sched_dict['check_ex'] = _hooked_check_expired
+            if hasattr(sp, 'check_expired'):
+                sp.check_expired = _hooked_check_expired
+        LOGGER.info("✅ 已成功装载到期封禁/删除通知重定向 Hook")
+    except Exception as e:
+        LOGGER.warning(f"装载 check_expired Hook 异常: {e}")
+
+
+_install_check_expired_hook()

@@ -249,6 +249,7 @@ class Config(BaseModel):
     red_envelope: RedEnvelope = Field(default_factory=RedEnvelope)
     api: API = Field(default_factory=API)
     game: Game = Field(default_factory=Game)
+    ban_del_to_owner: Optional[bool] = False
 
     def __init__(self, **data):
         super().__init__(**data)

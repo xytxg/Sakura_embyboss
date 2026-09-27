@@ -157,5 +157,6 @@
     "bet_no_emby": false,
     "rob_no_emby": false,
     "magnification": 10
-  }
+  },
+  "ban_del_to_owner": false
 }

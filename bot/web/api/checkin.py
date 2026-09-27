@@ -73,9 +73,11 @@ except (RedisConnectionError, redis.exceptions.ResponseError) as e:
     LOGGER.warning(f"❌ Redis 连接或认证失败: {e}. 将使用内存存储 Nonce")
     redis_client = None
 
+from cacheout import Cache
+
 user_request_records: Dict[int, list] = {}
 ip_request_records: Dict[str, list] = {}
-memory_used_nonces: set = set()
+memory_used_nonces = Cache(maxsize=10000, ttl=MAX_REQUEST_AGE * 2)
 
 # ==================== 请求模型 ====================
 class CheckinVerifyRequest(BaseModel):
@@ -245,22 +247,9 @@ def verify_request_freshness(timestamp: int, nonce: str) -> bool:
             LOGGER.warning(f"🟡 Redis Nonce 操作失败: {e}. 回退到内存检查")
             redis_client = None
 
-    mem_nonce_key = f"nonce:{timestamp}:{nonce}"
-
-    if mem_nonce_key in memory_used_nonces:
+    if memory_used_nonces.get(nonce):
         return False
-    
-    memory_used_nonces.add(mem_nonce_key)
-
-    if random.random() < 0.01:
-        expired_nonces = {
-            n for n in memory_used_nonces 
-            if current_time - int(n.split(':')[1]) > MAX_REQUEST_AGE
-        }
-        if expired_nonces:
-            memory_used_nonces.difference_update(expired_nonces)
-            LOGGER.debug(f"内存Nonce清理完成，移除了 {len(expired_nonces)} 个过期Nonce")
-
+    memory_used_nonces.set(nonce, True)
     return True
 
 async def verify_recaptcha_v3(token: str, client_ip: str) -> (bool, float, Optional[str]):
