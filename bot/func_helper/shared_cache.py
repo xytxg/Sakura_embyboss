@@ -49,21 +49,19 @@ ip_cache = DictCache(maxsize=2000, ttl=IP_CACHE_EXPIRATION)
 
 
 def _install_check_expired_hook():
-    """
-    动态 Hook check_expired 定时任务：
-    1. 当开启 ban_del_to_owner 时，无缝将原本发送给群组的到期封禁/删除通知重定向至 Owner；
-    2. 当给用户私聊报错（如 PEER_ID_INVALID 用户未开启私信）导致 forward 无法触发时，自动补发至 Owner/群组。
-    """
     try:
         import bot.scheduler.check_ex as check_ex
+        import bot as bot_module
         _orig_check_expired = check_ex.check_expired
 
         async def _hooked_check_expired():
-            ban_del_to_owner = getattr(config, 'ban_del_to_owner', False)
-            if not ban_del_to_owner and hasattr(config, 'api') and hasattr(config.api, 'log_to_tg'):
-                ban_del_to_owner = getattr(config.api.log_to_tg, 'ban_del_to_owner', False)
+            val = getattr(config, 'ban_del_to_owner', False)
+            if not val and hasattr(config, 'api') and hasattr(config.api, 'log_to_tg'):
+                val = getattr(config.api.log_to_tg, 'ban_del_to_owner', False)
+            ban_del_to_owner = val.lower() in ('true', '1', 'yes') if isinstance(val, str) else bool(val)
 
-            orig_group = check_ex.group
+            orig_group = getattr(check_ex, 'group', None)
+            orig_bot_group = getattr(bot_module, 'group', None)
             orig_send_message = bot.send_message
             target_chat = owner if ban_del_to_owner else (orig_group[0] if orig_group else owner)
 
@@ -71,7 +69,6 @@ def _install_check_expired_hook():
                 try:
                     return await orig_send_message(chat_id, *args, **kwargs)
                 except Exception as ex:
-                    # 如果向用户私信失败（如 PEER_ID_INVALID），补充兜底通知发给 Owner 或群组
                     if target_chat and chat_id != target_chat:
                         msg_text = str(args[0] if args else kwargs.get('text', ''))
                         try:
@@ -86,12 +83,17 @@ def _install_check_expired_hook():
             try:
                 if ban_del_to_owner:
                     check_ex.group = [owner]
+                    bot_module.group = [owner]
                 bot.send_message = _safe_send_message
                 return await _orig_check_expired()
             finally:
-                check_ex.group = orig_group
+                if orig_group is not None:
+                    check_ex.group = orig_group
+                if orig_bot_group is not None:
+                    bot_module.group = orig_bot_group
                 bot.send_message = orig_send_message
 
+        _hooked_check_expired.__name__ = 'check_expired'
         check_ex.check_expired = _hooked_check_expired
 
         import sys
@@ -102,10 +104,14 @@ def _install_check_expired_hook():
             if hasattr(sp, 'check_expired'):
                 sp.check_expired = _hooked_check_expired
 
+        import bot.scheduler as bs
+        bs.check_expired = _hooked_check_expired
+
         try:
             from bot.func_helper.scheduler import scheduler
             if hasattr(scheduler, 'SCHEDULER') and scheduler.SCHEDULER.get_job('check_expired'):
-                scheduler.SCHEDULER.modify_job('check_expired', func=_hooked_check_expired)
+                scheduler.remove_job('check_expired')
+                scheduler.add_job(_hooked_check_expired, 'cron', hour=1, minute=30, id='check_expired')
         except Exception:
             pass
 
